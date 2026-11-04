@@ -82,7 +82,7 @@ def test_manufacturer_sku_brand_name():
                    gender="G", manufacturer_sku="SRPD53K1", supplied_price=1_000_000)
     r = review(C, f)
     assert r.ok, r.errors
-    assert r.name == "Seiko SS BLK Bd SIL. G - DOOO"
+    assert r.name == "SK SS BLK Bd SIL. G - DOOO"
     assert r.sku == "SRPD53K1"
 
 
@@ -90,7 +90,7 @@ def test_clock_name_has_no_strap_or_gender():
     f = ItemFields(brand="Seiko JD", case_color="Gold", manufacturer_sku="QXA001", supplied_price=480_000)
     r = review(C, f)
     assert r.ok, r.errors
-    assert r.name == "Seiko JD Bd GLD - ACO"
+    assert r.name == "SKP JD Bd GLD - ACO"
 
 
 def test_descriptor_must_be_cumulative():
@@ -161,6 +161,17 @@ def test_caption_overrides_vision():
     assert merged.brand == "Seiko"
     assert merged.strap_type == "Leather"
     assert merged.uncertain == ["strap_type"]
+
+
+def test_brand_without_code_prints_full_name():
+    f = ItemFields(brand="Police", strap_type="Leather", strap_color="Brown", case_color="Gold",
+                   gender="G", manufacturer_sku="PL15000", selling_price=650_000)
+    assert review(C, f).name == "Police LS BRN Bd GLD. G - BMO"
+
+
+def test_caption_smartwatch_lines():
+    assert parse_caption(C, "smartwatch 300k").brand == "Smartwatch (non-Huawei)"
+    assert parse_caption(C, "huawei smartwatch 300k").brand == "Smartwatch (Huawei)"
 
 
 def test_sale_brand_number_becomes_selling_price():

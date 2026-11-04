@@ -64,14 +64,14 @@ def watch_name(catalog: Catalog, brand: Brand, strap_type: Code, strap_color: Co
                gender: Code, hjb: float, dial: Code | None = None, index: Code | None = None,
                crown: Code | None = None) -> str:
     descriptor = descriptor_for_name(dial, index, crown)
-    middle = f"{brand.print_as} {strap_type.code} {strap_color.code} Bd {case_color.code}"
+    middle = f"{brand.printed} {strap_type.code} {strap_color.code} Bd {case_color.code}"
     if descriptor:
         middle += f" {descriptor}"
     return f"{middle}. {gender.code} - {encode_cipher(catalog, hjb)}"
 
 
 def clock_name(catalog: Catalog, brand: Brand, case_color: Code, hjb: float) -> str:
-    return f"{brand.print_as} JD Bd {case_color.code} - {encode_cipher(catalog, hjb)}"
+    return f"{brand.printed} JD Bd {case_color.code} - {encode_cipher(catalog, hjb)}"
 
 
 def generated_sku(brand: Brand, ref_code: str, strap_type: Code, strap_color: Code, case_color: Code,

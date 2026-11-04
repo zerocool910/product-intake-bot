@@ -86,15 +86,24 @@ pending/confirmed items.
 ## Importing into accounting
 
 Open the sheet → the `Intake` tab → File → Download → Microsoft Excel →
-upload at `/products-import`. Import columns come first. The audit columns
-after them (`intake_id` … `notes`) are for people. See open item 4 in the
-spec about whether the importer accepts them.
+upload at `/products-import`. The importer only reads the **active** tab,
+so have `Intake` selected when you download. The audit columns after the
+import columns (`intake_id` … `notes`) are for people, and the importer
+ignores them.
 
 ## Changing codes, brands or rates
 
 Edit `config/codes.yaml` / `config/brands.yaml`, then restart. Names there
 must match the accounting app's Brand / Strap Type / Color / Index Type
-names exactly, because that's what the importer matches on.
+names exactly, because that's what the importer matches on. To check after
+either side changes:
+
+```bash
+python scripts/check_accounting_seeders.py /path/to/globaltimecollection-accounting
+```
+
+A brand's `code` is what prints as `{Brand}` on the tag. A brand with no
+code prints its full name, the same rule the accounting app uses.
 
 ## Development
 

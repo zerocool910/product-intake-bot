@@ -39,6 +39,7 @@ hand. Barcode is not an import column yet.
 
 The staging sheet has these columns **after** the import columns, for
 audit only: `intake_id`, `logged_by`, `logged_at`, `photos`,
-`preview_name`, `preview_sku`, `notes`. **To check:** whether the importer
-ignores unknown columns. If it doesn't, delete those columns from the export
-before uploading.
+`preview_name`, `preview_sku`, `notes`. The importer ignores them: it
+reads each field by its header name (lowercased, spaces → underscores).
+It only reads the workbook's **active** sheet, so make sure the `Intake`
+tab is the selected one when downloading.

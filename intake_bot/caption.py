@@ -70,7 +70,7 @@ def parse_caption(catalog: Catalog, text: str | None) -> ItemFields:
     lowered = f" {' '.join(rest.lower().split())} "
     candidates = []
     for b in catalog.brands.items:
-        for key in (b.name, b.code, *b.aliases):
+        for key in filter(None, (b.name, b.code, *b.aliases)):
             if f" {key.lower()} " in lowered:
                 candidates.append((len(key), b))
     if candidates:

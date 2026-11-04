@@ -82,19 +82,31 @@ Also settled from the accounting session:
 
 ## Open items
 
-1. **Brand names must match the accounting `BrandSeeder` exactly.**
-   `config/brands.yaml` uses the names from the pricing reference. Check
-   them against the seeder (e.g. is it "Seiko JD" or "Seiko Clock"? Is
-   "Smartwatch (Huawei)" a separate brand?).
-2. **`print_as` for long Nett-scheme names** (Hush Puppies, Jean Michelle…).
-   The naming convention only says long names get a code because of
-   80mm receipts, and doesn't list which ones. Currently the full name is
-   printed for everything except AC/EXP/CA.
+1. ~~Brand names vs the accounting `BrandSeeder`~~ **Checked 2026-11-04**
+   (accounting `71f0985`). All 29 brands, 13 strap types, 23 colors and
+   3 index types match, with codes and rates. The smartwatch brands are
+   named `Smartwatch (non-Huawei)` and `Smartwatch (Huawei)`, and SALE
+   brands have no code. To re-check after the accounting seeders change:
+   `python scripts/check_accounting_seeders.py <path-to-accounting-repo>`.
+2. **Which brands print a code vs the full name, still a conflict on
+   the accounting side.** The accounting app prints `code ?: name`
+   (`Brand::printedCode()`), and its seeder gives almost every brand a
+   code. So Seiko prints as `SK …`, Casio as `CS …`, Seiko JD as
+   `SKP JD …`, and Bonia as `BN …`. `docs/product-naming-convention.md`
+   says short names (Casio, Seiko) print directly, which would mean their
+   `code` should be null. The bot follows the accounting app, so the
+   preview matches what will actually be printed. The owner needs to
+   decide which brands print a code. The fix then goes in the accounting
+   `BrandSeeder` (set `code` to null for brands printed by full name), and
+   `config/brands.yaml` follows it. AC/EXP/CA always need their code,
+   because it is also the first part of their generated SKU.
 3. **Ref-code registry for AC/EXP/CA.** Staff must type the owner-assigned
    number. A later version could look up "next free number" or match a
    known model.
-4. **Does the importer ignore the extra audit columns?** If not, strip
-   them before upload, or have the bot write audit data to a second tab.
+4. ~~Does the importer ignore the extra audit columns?~~ **Yes.** The
+   importer reads each field by header name and ignores other columns. It
+   only reads the workbook's **active** sheet, though, so keep the
+   `Intake` tab first and selected when downloading the `.xlsx`.
 5. **Nett-scheme HJB rounding.** HBB × 1.5 is rarely a round figure.
    There is no rounding rule, and the cipher just truncates.
 6. **Photo backup / off-box storage.** Photos live on the VPS disk under

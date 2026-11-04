@@ -20,14 +20,18 @@ class Code:
 @dataclass(frozen=True)
 class Brand:
     name: str
-    code: str
-    print_as: str
+    code: str | None
     scheme: str  # list | nett | sale
     purchase_discounts: tuple[float, ...] = ()
     markup: float | None = None
     uses_generated_sku: bool = False
     kind: str = "watch"
     aliases: tuple[str, ...] = ()
+
+    @property
+    def printed(self) -> str:
+        """Same rule as the accounting app's Brand::printedCode(): code, else name."""
+        return self.code or self.name
 
 
 def _norm(s: str) -> str:
@@ -44,7 +48,7 @@ class Lookup:
     def __post_init__(self) -> None:
         for item in self.items:
             keys = [item.name, item.code, *getattr(item, "aliases", ())]
-            for k in keys:
+            for k in filter(None, keys):
                 self._index.setdefault(_norm(k), item)
 
     def get(self, key: str | None):
