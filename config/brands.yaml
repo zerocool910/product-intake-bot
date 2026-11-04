@@ -1,0 +1,54 @@
+# Brand table — mirror of docs/brand-pricing-reference.md.
+#
+# `name` must match the Brand name in the accounting app exactly (the
+# importer matches case-insensitively by name). Pricing fields are used only
+# for the confirm-time preview; the accounting app's Brand::priceBreakdown()
+# is the source of truth on import.
+#
+# scheme:
+#   list — staff type HLB (distributor list price). HBB = HLB × Π(1 − d). HJB = HLB.
+#   nett — staff type HBB (cost).                   HJB = HBB × (1 + markup).
+#   sale — no formula; staff type the selling price by hand.
+# print_as:            what appears as {Brand} in the printed name.
+# uses_generated_sku:  AC/EXP/CA — owner-invented ref_code, SKU built from attributes.
+#                      Everyone else — manufacturer SKU used directly.
+# kind:                default item type for the brand (watch | clock).
+# aliases:             extra words staff may type in a caption.
+
+brands:
+  # --- List scheme ---
+  - {name: Alexandre Christie, code: AC, print_as: AC, scheme: list, purchase_discounts: [0.47, 0.10], uses_generated_sku: true, aliases: [alexandre]}
+  - {name: Expedition, code: EXP, print_as: EXP, scheme: list, purchase_discounts: [0.50, 0.10], uses_generated_sku: true, aliases: [exp]}
+  - {name: Christophe Arden, code: CA, print_as: CA, scheme: list, purchase_discounts: [0.50, 0.10], uses_generated_sku: true, aliases: [arden]}
+  - {name: Seiko, code: SK, print_as: Seiko, scheme: list, purchase_discounts: [0.30, 0.03, 0.02]}
+  - {name: Seiko JD, code: SKP, print_as: Seiko, scheme: list, purchase_discounts: [0.30, 0.03, 0.02], kind: clock, aliases: [seiko clock, seiko jd]}
+  - {name: Alba, code: AL, print_as: Alba, scheme: list, purchase_discounts: [0.30, 0.03, 0.02]}
+  - {name: Aigner, code: AIG, print_as: Aigner, scheme: list, purchase_discounts: [0.40]}
+  - {name: Casio, code: CS, print_as: Casio, scheme: list, purchase_discounts: [0.42]}
+  - {name: Guess, code: GS, print_as: Guess, scheme: list, purchase_discounts: [0.35]}
+
+  # --- Nett scheme ---
+  - {name: Bonia, code: BN, print_as: Bonia, scheme: nett, markup: 0.50}
+  - {name: Timberland, code: TBL, print_as: Timberland, scheme: nett, markup: 0.50}
+  - {name: Sezen, code: SZ, print_as: Sezen, scheme: nett, markup: 0.50}
+  - {name: Digitec, code: DG, print_as: Digitec, scheme: nett, markup: 0.50}
+  - {name: Jean Michelle, code: JM, print_as: Jean Michelle, scheme: nett, markup: 0.50}
+  - {name: Lobor, code: LB, print_as: Lobor, scheme: nett, markup: 0.50}
+  - {name: Hush Puppies, code: HP, print_as: Hush Puppies, scheme: nett, markup: 0.50}
+  - {name: Caterpillar, code: CAT, print_as: Caterpillar, scheme: nett, markup: 0.50}
+  - {name: Condotti, code: CN, print_as: Condotti, scheme: nett, markup: 0.50}
+  - {name: Wishkey, code: WK, print_as: Wishkey, scheme: nett, markup: 0.50}
+  - {name: Mirage, code: MRG, print_as: Mirage, scheme: nett, markup: 0.50}
+  - {name: Smartwatch, code: SM, print_as: Smartwatch, scheme: nett, markup: 0.70}
+  - {name: Huawei, code: HW, print_as: Huawei, scheme: nett, markup: 0.50}  # code HW is a placeholder — none defined yet
+
+  # --- SALE (no formula, clearance terms) ---
+  # `code` on SALE brands is unused (they print the full name and use the
+  # manufacturer SKU); the values are placeholders, not owner-confirmed.
+  - {name: Police, code: POL, print_as: Police, scheme: sale}
+  - {name: Alain Delon, code: AD, print_as: Alain Delon, scheme: sale}
+  - {name: Hummer, code: HUM, print_as: Hummer, scheme: sale}
+  - {name: Charles Jourdan, code: CJ, print_as: Charles Jourdan, scheme: sale}
+  - {name: Festina, code: FES, print_as: Festina, scheme: sale}
+  - {name: Christ Verra, code: CV, print_as: Christ Verra, scheme: sale}
+  - {name: Lee Cooper, code: LC, print_as: Lee Cooper, scheme: sale}

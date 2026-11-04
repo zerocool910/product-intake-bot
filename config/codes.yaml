@@ -1,0 +1,64 @@
+# Attribute code tables — mirror of docs/product-naming-convention.md.
+#
+# The accounting importer (`/products-import`) matches these by NAME against
+# its own admin-editable StrapType / Color / IndexType tables, so the `name`
+# values here must stay identical to what's seeded there. Codes are only used
+# by this bot to render a preview of the printed name / SKU at confirm time;
+# the accounting app generates the real ones on import.
+
+genders:
+  - {name: Gents, code: G}
+  - {name: Ladies, code: L}
+  - {name: All, code: A}
+  - {name: Gents/Ladies, code: G/L}
+
+strap_types:
+  - {name: Leather, code: LS}
+  - {name: Rubber, code: RB}
+  - {name: Stainless St., code: SS}
+  - {name: Steel, code: SL}
+  - {name: Rantai Kombi, code: DT}
+  - {name: Stainless St. Mica, code: SM}
+  - {name: Stainless St. Ceramic, code: SC}
+  - {name: Ceramic, code: CR}
+  - {name: Rantai Pasir, code: MS}
+  - {name: Kanvas, code: NS}
+  - {name: Carbon Fibre, code: CF}
+  - {name: Titanium St., code: TS}
+  - {name: Sailcloth, code: SO}
+
+# code: 3-letter code used in the printed name.
+# number: 2-digit code used only in the AC/EXP/CA generated SKU.
+colors:
+  - {name: White, code: WHT, number: "01"}
+  - {name: Black, code: BLK, number: "02"}
+  - {name: Red, code: RED, number: "03"}
+  - {name: Blue, code: BLU, number: "04"}
+  - {name: Navy Blue, code: NVY, number: "05"}
+  - {name: Yellow, code: YLW, number: "06"}
+  - {name: Green, code: GRN, number: "07"}
+  - {name: Orange, code: ORG, number: "08"}
+  - {name: Purple, code: PPL, number: "09"}
+  - {name: Grey, code: GRY, number: "10"}
+  - {name: Brown, code: BRN, number: "11"}
+  - {name: Dark Grey, code: DGY, number: "12"}
+  - {name: Ivory, code: IVR, number: "13"}
+  - {name: Cream, code: CRM, number: "14"}
+  - {name: Beige, code: BEI, number: "15"}
+  - {name: Khaki, code: KHK, number: "16"}
+  - {name: Pink, code: PNK, number: "17"}
+  - {name: Silver, code: SIL, number: "18"}
+  - {name: Silver Stone, code: SLS, number: "19"}
+  - {name: Rose Gold, code: RSG, number: "20"}
+  - {name: Gold, code: GLD, number: "21"}
+  - {name: Titanium, code: TTN, number: "22"}
+  - {name: Colored, code: CLR, number: "23"}
+
+# Open list — add new index styles here (and in the accounting app).
+index_types:
+  - {name: Numeral, code: NUM}
+  - {name: Baton, code: BTN}
+  - {name: Roman, code: ROM}
+
+# Price-tag cipher, digit -> letter.
+cipher: {"0": O, "1": D, "2": U, "3": T, "4": A, "5": M, "6": B, "7": S, "8": C, "9": E}

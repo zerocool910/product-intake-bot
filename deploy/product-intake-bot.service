@@ -1,0 +1,21 @@
+# systemd unit. Install:
+#   sudo cp deploy/product-intake-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now product-intake-bot
+# Logs:
+#   journalctl -u product-intake-bot -f
+
+[Unit]
+Description=Product intake Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=intakebot
+WorkingDirectory=/opt/product-intake-bot
+ExecStart=/opt/product-intake-bot/.venv/bin/python -m intake_bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
