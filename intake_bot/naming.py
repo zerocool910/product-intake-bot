@@ -78,5 +78,5 @@ def generated_sku(brand: Brand, ref_code: str, strap_type: Code, strap_color: Co
                   gender: Code, dial: Code | None = None, index: Code | None = None,
                   crown: Code | None = None) -> str:
     """{BrandCode}{RefCode}{StrapType}{StrapColor#}C{CaseColor#}{Gender}{descriptor}"""
-    return (f"{brand.code}{ref_code}{strap_type.code}{strap_color.number}C{case_color.number}"
+    return (f"{brand.printed}{ref_code}{strap_type.code}{strap_color.number}C{case_color.number}"
             f"{gender.code}{descriptor_for_sku(dial, index, crown)}")

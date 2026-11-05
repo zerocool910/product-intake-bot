@@ -88,18 +88,21 @@ Also settled from the accounting session:
    named `Smartwatch (non-Huawei)` and `Smartwatch (Huawei)`, and SALE
    brands have no code. To re-check after the accounting seeders change:
    `python scripts/check_accounting_seeders.py <path-to-accounting-repo>`.
-2. **Which brands print a code vs the full name, still a conflict on
-   the accounting side.** The accounting app prints `code ?: name`
-   (`Brand::printedCode()`), and its seeder gives almost every brand a
-   code. So Seiko prints as `SK …`, Casio as `CS …`, Seiko JD as
-   `SKP JD …`, and Bonia as `BN …`. `docs/product-naming-convention.md`
-   says short names (Casio, Seiko) print directly, which would mean their
-   `code` should be null. The bot follows the accounting app, so the
-   preview matches what will actually be printed. The owner needs to
-   decide which brands print a code. The fix then goes in the accounting
-   `BrandSeeder` (set `code` to null for brands printed by full name), and
-   `config/brands.yaml` follows it. AC/EXP/CA always need their code,
-   because it is also the first part of their generated SKU.
+2. ~~Which brands print a code vs the full name~~ **Resolved on the
+   accounting side (`830ee94`).** Brands have a `print_code_on_tag` flag
+   (default true). Seiko, Seiko JD and Casio are set to false, so they
+   print their full name, and the owner can flip any brand on the
+   accounting `/brands` screen. `config/brands.yaml` mirrors the flag.
+   **A change made on `/brands` must be copied into `config/brands.yaml`
+   by hand**, because the seeder checker can't see UI edits.
+   - **Bug this exposed (accounting side, not fixed yet):** the clock
+     pattern is `{Brand} JD Bd …`, so Seiko JD printing its full name gives
+     **`Seiko JD JD Bd SIL - SOO`**. The fix belongs in the accounting app,
+     either in `buildClockName()` or by deciding that Seiko JD prints
+     `Seiko` on clocks. The bot preview currently shows the doubled "JD",
+     matching what the importer would produce (pinned in
+     `test_clock_name_has_no_strap_or_gender`), and should change when the
+     accounting fix lands.
 3. **Ref-code registry for AC/EXP/CA.** Staff must type the owner-assigned
    number. A later version could look up "next free number" or match a
    known model.
@@ -111,5 +114,10 @@ Also settled from the accounting session:
    There is no rounding rule, and the cipher just truncates.
 6. **Photo backup / off-box storage.** Photos live on the VPS disk under
    `data/`. Back that folder up, or add cloud storage later.
-7. **Direct sheet → importer path** (skipping the `.xlsx` export), if `#1`
+7. **Restocks.** Since `dc919ae` the importer rejects a SKU that already
+   exists in accounting or repeats within the file. The bot warns when a
+   SKU is already in the staging sheet, but it can't see the accounting
+   catalog. More stock of an item that's already in accounting is a stock
+   receipt there, not a new import row.
+8. **Direct sheet → importer path** (skipping the `.xlsx` export), if `#1`
    ever reads Google Sheets.

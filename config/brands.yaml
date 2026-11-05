@@ -1,7 +1,7 @@
 # Brand table — mirror of docs/brand-pricing-reference.md.
 #
 # Names, codes and rates mirror globaltimecollection-accounting's
-# database/seeders/BrandSeeder.php (checked 2026-11-04 at 71f0985). `name`
+# database/seeders/BrandSeeder.php (checked 2026-11-05 at 830ee94). `name`
 # must match exactly: the importer looks brands up by name only.
 #
 # Pricing fields are used only for the confirm-time preview; the accounting app's Brand::priceBreakdown()
@@ -11,8 +11,11 @@
 #   list — staff type HLB (distributor list price). HBB = HLB × Π(1 − d). HJB = HLB.
 #   nett — staff type HBB (cost).                   HJB = HBB × (1 + markup).
 #   sale — no formula; staff type the selling price by hand.
-# code:                printed as {Brand} in the name (accounting's Brand::printedCode()
-#                      is `code ?: name`); null means the full name is printed.
+# code:                the brand's short code; printed as {Brand} in the name unless
+#                      print_code_on_tag is false. Null means the full name is printed.
+# print_code_on_tag:   default true. False prints the full name even when a code exists
+#                      (accounting's Brand::printedCode()). The owner can flip this per
+#                      brand on the accounting /brands screen; if they do, mirror it here.
 # uses_generated_sku:  AC/EXP/CA — owner-invented ref_code, SKU built from attributes.
 #                      Everyone else — manufacturer SKU used directly.
 # kind:                default item type for the brand (watch | clock).
@@ -23,11 +26,11 @@ brands:
   - {name: Alexandre Christie, code: AC, scheme: list, purchase_discounts: [0.47, 0.10], uses_generated_sku: true, aliases: [alexandre]}
   - {name: Expedition, code: EXP, scheme: list, purchase_discounts: [0.50, 0.10], uses_generated_sku: true, aliases: [exp]}
   - {name: Christophe Arden, code: CA, scheme: list, purchase_discounts: [0.50, 0.10], uses_generated_sku: true, aliases: [arden]}
-  - {name: Seiko, code: SK, scheme: list, purchase_discounts: [0.30, 0.03, 0.02]}
-  - {name: Seiko JD, code: SKP, scheme: list, purchase_discounts: [0.30, 0.03, 0.02], kind: clock, aliases: [seiko clock, seiko jd]}
+  - {name: Seiko, code: SK, print_code_on_tag: false, scheme: list, purchase_discounts: [0.30, 0.03, 0.02]}
+  - {name: Seiko JD, code: SKP, print_code_on_tag: false, scheme: list, purchase_discounts: [0.30, 0.03, 0.02], kind: clock, aliases: [seiko clock, seiko jd]}
   - {name: Alba, code: AL, scheme: list, purchase_discounts: [0.30, 0.03, 0.02]}
   - {name: Aigner, code: AIG, scheme: list, purchase_discounts: [0.40]}
-  - {name: Casio, code: CS, scheme: list, purchase_discounts: [0.42]}
+  - {name: Casio, code: CS, print_code_on_tag: false, scheme: list, purchase_discounts: [0.42]}
   - {name: Guess, code: GS, scheme: list, purchase_discounts: [0.35]}
 
   # --- Nett scheme ---

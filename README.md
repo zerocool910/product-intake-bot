@@ -102,8 +102,12 @@ either side changes:
 python scripts/check_accounting_seeders.py /path/to/globaltimecollection-accounting
 ```
 
-A brand's `code` is what prints as `{Brand}` on the tag. A brand with no
-code prints its full name, the same rule the accounting app uses.
+A brand's `code` is what prints as `{Brand}` on the tag, unless
+`print_code_on_tag: false` (Seiko, Seiko JD, Casio) or there's no code, in
+which case the full name prints. This is the same rule as the accounting
+app. If the owner changes a brand on the accounting `/brands` screen, make
+the same change in `config/brands.yaml`, because the checker only reads
+the seeders.
 
 ## Development
 

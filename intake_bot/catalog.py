@@ -22,6 +22,7 @@ class Brand:
     name: str
     code: str | None
     scheme: str  # list | nett | sale
+    print_code_on_tag: bool = True
     purchase_discounts: tuple[float, ...] = ()
     markup: float | None = None
     uses_generated_sku: bool = False
@@ -30,7 +31,9 @@ class Brand:
 
     @property
     def printed(self) -> str:
-        """Same rule as the accounting app's Brand::printedCode(): code, else name."""
+        """Same rule as the accounting app's Brand::printedCode()."""
+        if not self.print_code_on_tag:
+            return self.name
         return self.code or self.name
 
 

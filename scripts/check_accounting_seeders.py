@@ -4,8 +4,9 @@
 
 The importer matches brands, strap types, colors and index types by name,
 so any drift here makes rows fail on import. Exits 1 if anything differs.
-Only reads the seeders' literal arrays; rows added later through the
-accounting admin UI aren't seen, so check those by hand.
+Only reads the seeders' literal arrays. Changes made later in the
+accounting admin UI (new brands, the /brands code / print-code toggle)
+aren't seen, so mirror those by hand.
 """
 
 from __future__ import annotations
@@ -30,8 +31,8 @@ def php_rows(path: Path) -> list[list]:
     return rows
 
 
-def sale_names(path: Path) -> list[str]:
-    block = re.search(r"\$saleOnly\s*=\s*\[(.*?)\];", path.read_text(encoding="utf-8"), re.S)
+def php_name_list(path: Path, var: str) -> list[str]:
+    block = re.search(rf"\${var}\s*=\s*\[(.*?)\];", path.read_text(encoding="utf-8"), re.S)
     return re.findall(r"'([^']+)'", block.group(1)) if block else []
 
 
@@ -56,18 +57,20 @@ def main(repo: Path) -> int:
     compare("index type", {r[0]: (r[1],) for r in php_rows(seeders / "IndexTypeSeeder.php")},
             {i.name: (i.code,) for i in c.index_types.items})
 
-    brand_rows = php_rows(seeders / "BrandSeeder.php")
+    seeder = seeders / "BrandSeeder.php"
+    full_name = set(php_name_list(seeder, "printsFullName"))
     theirs = {}
-    for r in brand_rows:
+    for r in php_rows(seeder):
+        prints_code = r[0] not in full_name
         if isinstance(r[2], list):  # list scheme: name, code, discounts, ...
-            theirs[r[0]] = (r[1], "list", tuple(round(d, 4) for d in r[2]), None)
+            theirs[r[0]] = (r[1], prints_code, "list", tuple(round(d, 4) for d in r[2]), None)
         else:                        # nett scheme: name, code, markup, ...
-            theirs[r[0]] = (r[1], "nett", (), round(r[2], 4))
-    for name in sale_names(seeders / "BrandSeeder.php"):
-        theirs[name] = (None, "sale", (), None)
-    ours = {b.name: (b.code, b.scheme, tuple(round(d, 4) for d in b.purchase_discounts),
+            theirs[r[0]] = (r[1], prints_code, "nett", (), round(r[2], 4))
+    for name in php_name_list(seeder, "saleOnly"):
+        theirs[name] = (None, True, "sale", (), None)
+    ours = {b.name: (b.code, b.print_code_on_tag, b.scheme, tuple(round(d, 4) for d in b.purchase_discounts),
                      round(b.markup, 4) if b.markup is not None else None) for b in c.brands.items}
-    compare("brand (code, scheme, discounts, markup)", theirs, ours)
+    compare("brand (code, print_code_on_tag, scheme, discounts, markup)", theirs, ours)
 
     if problems:
         print("\n".join(problems))

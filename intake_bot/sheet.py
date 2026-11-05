@@ -39,6 +39,14 @@ class Sheet:
     def append(self, row: dict[str, object]) -> None:
         self.ws.append_row([row.get(c, "") for c in HEADER], value_input_option="RAW")
 
+    def same_sku(self, sku: str) -> list[dict]:
+        """Rows already in the sheet with this SKU. The importer rejects a SKU
+        that repeats within one file or already exists in accounting."""
+        if not sku:
+            return []
+        return [r for r in self.ws.get_all_records(expected_headers=HEADER)
+                if str(r.get("preview_sku", "")).strip().upper() == sku.strip().upper()]
+
     def similar(self, row: dict[str, object]) -> list[dict]:
         """Rows already in the sheet with the same brand + strap + strap color + case.
 

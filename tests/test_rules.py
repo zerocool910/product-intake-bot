@@ -82,7 +82,7 @@ def test_manufacturer_sku_brand_name():
                    gender="G", manufacturer_sku="SRPD53K1", supplied_price=1_000_000)
     r = review(C, f)
     assert r.ok, r.errors
-    assert r.name == "SK SS BLK Bd SIL. G - DOOO"
+    assert r.name == "Seiko SS BLK Bd SIL. G - DOOO"
     assert r.sku == "SRPD53K1"
 
 
@@ -90,7 +90,9 @@ def test_clock_name_has_no_strap_or_gender():
     f = ItemFields(brand="Seiko JD", case_color="Gold", manufacturer_sku="QXA001", supplied_price=480_000)
     r = review(C, f)
     assert r.ok, r.errors
-    assert r.name == "SKP JD Bd GLD - ACO"
+    # Mirrors the accounting app as of 830ee94: Seiko JD prints its full
+    # name, and the clock pattern then adds "JD" again. Reported upstream.
+    assert r.name == "Seiko JD JD Bd GLD - ACO"
 
 
 def test_descriptor_must_be_cumulative():
@@ -167,6 +169,19 @@ def test_brand_without_code_prints_full_name():
     f = ItemFields(brand="Police", strap_type="Leather", strap_color="Brown", case_color="Gold",
                    gender="G", manufacturer_sku="PL15000", selling_price=650_000)
     assert review(C, f).name == "Police LS BRN Bd GLD. G - BMO"
+
+
+def test_print_code_on_tag():
+    assert C.brands.get("Casio").printed == "Casio"
+    assert C.brands.get("Alexandre Christie").printed == "AC"
+    assert C.brands.get("Bonia").printed == "BN"
+
+
+def test_generated_sku_brands_always_print_their_code():
+    # Their SKU starts with the printed code, so the flag must stay on.
+    for b in C.brands.items:
+        if b.uses_generated_sku:
+            assert b.code and b.print_code_on_tag, b.name
 
 
 def test_caption_smartwatch_lines():

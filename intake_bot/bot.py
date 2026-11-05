@@ -212,11 +212,17 @@ class IntakeBot:
                 lines.append(hint)
         if r.ok:
             try:
+                same_sku = await asyncio.to_thread(self.sheet.same_sku, r.sku or "")
                 dupes = await asyncio.to_thread(self.sheet.similar, to_import_row(self.catalog, f))
             except Exception:  # sheet hiccups must not block the summary
                 log.exception("Duplicate check failed")
-                dupes = []
-            if dupes:
+                same_sku, dupes = [], []
+            if same_sku:
+                ids = ", ".join(str(x.get("intake_id", "?")) for x in same_sku)
+                lines.append(f"⛔ SKU {e(r.sku)} is already in the sheet ({e(ids)}). The import rejects "
+                             "repeated SKUs. If this is more stock of the same item, cancel this and add "
+                             "the qty to that row, or record it as a stock receipt in accounting.")
+            elif dupes:
                 lines.append(f"⚠️ {len(dupes)} item(s) in the sheet would print the same name. "
                              "If this is a different model, add a descriptor (e.g. \"dial blue\").")
         if f.uncertain:

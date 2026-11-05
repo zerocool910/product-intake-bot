@@ -1,6 +1,7 @@
 # Accounting import columns (mirror)
 
 **Source of truth:** `globaltimecollection-accounting/docs/product-import-template.md`
+and `app/Services/ProductImportService.php` (checked at `830ee94`)
 (the `/products-import` Excel importer). This is a copy so this repo is
 self-contained. If the accounting side changes, update this file,
 `IMPORT_COLUMNS` in `intake_bot/item.py`, and `review()` in the same file.
@@ -30,6 +31,11 @@ and cost/selling price from these columns. They are not typed in directly.
 
 Rows are imported independently: a bad row is skipped and reported, and
 doesn't block the rest.
+
+**SKUs must be new** (since `dc919ae`): a row is rejected if its SKU (the
+manufacturer SKU, or the generated AC/EXP/CA SKU) already exists in
+accounting or appears earlier in the same file. Restocks of existing items
+are recorded as stock receipts in accounting, not imported again.
 
 Known gaps on the accounting side (as of 2026-11-04): AC/EXP/CA **clocks**
 have no generated-SKU pattern yet, so they need `manufacturer_sku` set by
