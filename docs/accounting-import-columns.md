@@ -1,7 +1,7 @@
 # Accounting import columns (mirror)
 
 **Source of truth:** `globaltimecollection-accounting/docs/product-import-template.md`
-and `app/Services/ProductImportService.php` (checked at `830ee94`)
+and `app/Services/ProductImportService.php` (checked at `4634f6b`)
 (the `/products-import` Excel importer). This is a copy so this repo is
 self-contained. If the accounting side changes, update this file,
 `IMPORT_COLUMNS` in `intake_bot/item.py`, and `review()` in the same file.

@@ -18,6 +18,7 @@ _PRICE = re.compile(
 _QTY = re.compile(r"\b(?:qty|jumlah|pcs)\s*[:=]?\s*(\d+)\b|\bx\s?(\d+)\b", re.IGNORECASE)
 _REF = re.compile(r"\bref\s*[:=]?\s*([A-Za-z0-9]+)\b", re.IGNORECASE)
 _SKU = re.compile(r"\bsku\s*[:=]?\s*([A-Za-z0-9-]+)\b", re.IGNORECASE)
+_CLOCK = re.compile(r"\b(jd|clock|jam dinding|dinding|wall clock)\b", re.IGNORECASE)
 _GENDER = re.compile(r"(?<!\w)(G/L|gents|ladies|men|women|pria|wanita|unisex|G|L)(?!\w)")
 _GENDER_MAP = {"g/l": "Gents/Ladies", "gents": "Gents", "men": "Gents", "pria": "Gents", "g": "Gents",
                "ladies": "Ladies", "women": "Ladies", "wanita": "Ladies", "l": "Ladies", "unisex": "All"}
@@ -78,6 +79,10 @@ def parse_caption(catalog: Catalog, text: str | None) -> ItemFields:
         out["brand"] = brand.name
         if brand.kind == "clock":
             out["type"] = "clock"
+
+    # "JD" / "clock" marks a clock (e.g. "Seiko JD"); it's not part of a brand name.
+    if _CLOCK.search(rest):
+        out["type"] = "clock"
 
     if m := _GENDER.search(rest):
         token = m.group(1)

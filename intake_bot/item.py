@@ -127,16 +127,18 @@ def review(catalog: Catalog, f: ItemFields) -> Review:
     if f.quantity is not None and f.quantity < 0:
         r.errors.append("quantity cannot be negative")
 
-    # Preview — only when everything it needs resolved.
+    # Preview — only when everything it needs resolved. SKU first: a clock's
+    # printed name includes it.
     try:
-        if brand and r.hjb and kind == "clock" and case_color:
-            r.name = clock_name(catalog, brand, case_color, r.hjb)
-        elif brand and r.hjb and is_watch and all([strap_type, strap_color, case_color, gender]):
-            r.name = watch_name(catalog, brand, strap_type, strap_color, case_color, gender, r.hjb, dial, index, crown)
-        if brand and brand.uses_generated_sku and is_watch and f.ref_code and all([strap_type, strap_color, case_color, gender]):
-            r.sku = generated_sku(brand, f.ref_code, strap_type, strap_color, case_color, gender, dial, index, crown)
+        if brand and brand.uses_generated_sku and is_watch:
+            if f.ref_code and all([strap_type, strap_color, case_color, gender]):
+                r.sku = generated_sku(brand, f.ref_code, strap_type, strap_color, case_color, gender, dial, index, crown)
         elif brand and f.manufacturer_sku:
             r.sku = f.manufacturer_sku
+        if brand and r.hjb and kind == "clock" and case_color and r.sku:
+            r.name = clock_name(catalog, brand, r.sku, case_color, r.hjb)
+        elif brand and r.hjb and is_watch and all([strap_type, strap_color, case_color, gender]):
+            r.name = watch_name(catalog, brand, strap_type, strap_color, case_color, gender, r.hjb, dial, index, crown)
     except NamingError as e:
         r.errors.append(str(e))
 

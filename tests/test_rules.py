@@ -50,10 +50,8 @@ def test_sale_brand_uses_typed_selling_price():
     assert price_breakdown(C.brands.get("Police"), 500_000) is None
 
 
-def test_seiko_jd_and_alba_share_seiko_watch_discounts():
-    seiko = C.brands.get("Seiko").purchase_discounts
-    assert C.brands.get("Seiko JD").purchase_discounts == seiko
-    assert C.brands.get("Alba").purchase_discounts == seiko
+def test_alba_shares_seiko_discounts():
+    assert C.brands.get("Alba").purchase_discounts == C.brands.get("Seiko").purchase_discounts
 
 
 # ---------- names / SKU ----------
@@ -86,13 +84,24 @@ def test_manufacturer_sku_brand_name():
     assert r.sku == "SRPD53K1"
 
 
-def test_clock_name_has_no_strap_or_gender():
-    f = ItemFields(brand="Seiko JD", case_color="Gold", manufacturer_sku="QXA001", supplied_price=480_000)
+def test_clock_name_matches_accounting_example():
+    # Verified end to end on the accounting side (4634f6b):
+    # Seiko clock QXA756W, white case, HJB 250,000 -> "Seiko JD QXA756W Bd WHT - UMO".
+    f = ItemFields(type="clock", brand="Seiko", case_color="White", manufacturer_sku="QXA756W", supplied_price=250_000)
     r = review(C, f)
     assert r.ok, r.errors
-    # Mirrors the accounting app as of 830ee94: Seiko JD prints its full
-    # name, and the clock pattern then adds "JD" again. Reported upstream.
-    assert r.name == "Seiko JD JD Bd GLD - ACO"
+    assert r.name == "Seiko JD QXA756W Bd WHT - UMO"
+
+
+def test_clock_needs_no_strap_or_gender_but_needs_sku():
+    r = review(C, ItemFields(type="clock", brand="Seiko", case_color="White", supplied_price=250_000))
+    assert r.errors == ["manufacturer_sku is missing"]
+    assert r.name is None
+
+
+def test_generated_sku_brand_clock_needs_manufacturer_sku():
+    r = review(C, ItemFields(type="clock", brand="AC", case_color="Gold", supplied_price=500_000))
+    assert any("manufacturer_sku" in e for e in r.errors)
 
 
 def test_descriptor_must_be_cumulative():
@@ -148,9 +157,15 @@ def test_caption_full():
         "Alexandre Christie", 950_000, "AE1200", "Ladies", 2)
 
 
-def test_caption_prefers_longest_brand_match():
-    f = parse_caption(C, "seiko jd 480.000")
-    assert f.brand == "Seiko JD" and f.type == "clock"
+def test_caption_jd_means_seiko_clock():
+    f = parse_caption(C, "Seiko JD 250k sku QXA756W")
+    assert (f.brand, f.type, f.manufacturer_sku, f.supplied_price) == ("Seiko", "clock", "QXA756W", 250_000)
+    assert parse_caption(C, "Casio clock 300k").type == "clock"
+    assert parse_caption(C, "Casio 300k").type is None
+
+
+def test_seiko_jd_is_not_a_brand():
+    assert C.brands.get("Seiko JD") is None
 
 
 def test_caption_lowercase_single_letters_are_not_gender():

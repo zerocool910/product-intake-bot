@@ -70,8 +70,9 @@ def watch_name(catalog: Catalog, brand: Brand, strap_type: Code, strap_color: Co
     return f"{middle}. {gender.code} - {encode_cipher(catalog, hjb)}"
 
 
-def clock_name(catalog: Catalog, brand: Brand, case_color: Code, hjb: float) -> str:
-    return f"{brand.printed} JD Bd {case_color.code} - {encode_cipher(catalog, hjb)}"
+def clock_name(catalog: Catalog, brand: Brand, sku: str, case_color: Code, hjb: float) -> str:
+    """{Brand} JD {SKU / Ref Code} Bd {Case} - {Cipher}. "JD" is fixed text, like "Bd"."""
+    return f"{brand.printed} JD {sku} Bd {case_color.code} - {encode_cipher(catalog, hjb)}"
 
 
 def generated_sku(brand: Brand, ref_code: str, strap_type: Code, strap_color: Code, case_color: Code,

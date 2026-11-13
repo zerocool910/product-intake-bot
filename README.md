@@ -19,6 +19,7 @@ Send one photo, or an album with the item, tag and box, with a caption like:
 Seiko 1.250.000 G
 AC 950k ref AE1200 L qty 2
 Bonia 400rb Ladies sku BNB10123
+Seiko JD 250k sku QXA756W        (JD or "clock" = a clock)
 ```
 
 - **List brands** (AC, EXP, CA, Seiko, Alba, Casio, Guess, Aigner): type
@@ -103,7 +104,7 @@ python scripts/check_accounting_seeders.py /path/to/globaltimecollection-account
 ```
 
 A brand's `code` is what prints as `{Brand}` on the tag, unless
-`print_code_on_tag: false` (Seiko, Seiko JD, Casio) or there's no code, in
+`print_code_on_tag: false` (Seiko, Casio) or there's no code, in
 which case the full name prints. This is the same rule as the accounting
 app. If the owner changes a brand on the accounting `/brands` screen, make
 the same change in `config/brands.yaml`, because the checker only reads

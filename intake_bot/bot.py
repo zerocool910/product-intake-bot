@@ -35,6 +35,7 @@ HELP = (
     "• List brands (AC, EXP, Seiko, Casio…): type the distributor <b>list price</b>.\n"
     "• Nett brands (Bonia, Timberland…): type the <b>cost</b>.\n"
     "• SALE brands: type the selling price.\n"
+    "Clocks: add <code>JD</code> or <code>clock</code>, e.g. <code>Seiko JD 250k sku QXA756W</code>.\n"
     "Then reply to my summary in plain words to fix anything (\"rubber not leather, ladies\"), "
     "and press ✅ when it's right."
 )

@@ -68,7 +68,11 @@ Also settled from the accounting session:
 - `NAAE1200SS18C18G` used a placeholder brand code "NA". The real form is
   `{BrandCode}{RefCode}...`, e.g. `ACAE1200SS18C18G`. Ref codes can contain
   letters.
-- `type` (watch/clock) is an explicit column. Seiko JD defaults to clock.
+- `type` (watch/clock) is an explicit column. A caption with `JD` or
+  `clock` sets it to clock (e.g. `Seiko JD 250k sku QXA756W`).
+- Clock names are `{Brand} JD {SKU} Bd {Case} - {Cipher}` (accounting
+  `4634f6b`): "JD" is fixed text and the clock's own SKU is printed. "Seiko
+  JD" is no longer a brand; Seiko clocks are brand Seiko with Seiko pricing.
 
 ## Non-goals (v1)
 
@@ -86,23 +90,19 @@ Also settled from the accounting session:
    (accounting `71f0985`). All 29 brands, 13 strap types, 23 colors and
    3 index types match, with codes and rates. The smartwatch brands are
    named `Smartwatch (non-Huawei)` and `Smartwatch (Huawei)`, and SALE
-   brands have no code. To re-check after the accounting seeders change:
+   brands have no code. Re-checked 2026-11-13 at `4634f6b`: 28 brands
+   after Seiko JD was retired. To re-check after the accounting seeders change:
    `python scripts/check_accounting_seeders.py <path-to-accounting-repo>`.
 2. ~~Which brands print a code vs the full name~~ **Resolved on the
    accounting side (`830ee94`).** Brands have a `print_code_on_tag` flag
-   (default true). Seiko, Seiko JD and Casio are set to false, so they
-   print their full name, and the owner can flip any brand on the
-   accounting `/brands` screen. `config/brands.yaml` mirrors the flag.
+   (default true). Seiko and Casio are set to false, so they print their
+   full name, and the owner can flip any brand on the accounting
+   `/brands` screen. `config/brands.yaml` mirrors the flag.
    **A change made on `/brands` must be copied into `config/brands.yaml`
    by hand**, because the seeder checker can't see UI edits.
-   - **Bug this exposed (accounting side, not fixed yet):** the clock
-     pattern is `{Brand} JD Bd …`, so Seiko JD printing its full name gives
-     **`Seiko JD JD Bd SIL - SOO`**. The fix belongs in the accounting app,
-     either in `buildClockName()` or by deciding that Seiko JD prints
-     `Seiko` on clocks. The bot preview currently shows the doubled "JD",
-     matching what the importer would produce (pinned in
-     `test_clock_name_has_no_strap_or_gender`), and should change when the
-     accounting fix lands.
+   - The doubled-"JD" clock name this exposed was fixed in accounting
+     `4634f6b` (new clock pattern, Seiko JD retired as a brand). The bot
+     follows it.
 3. **Ref-code registry for AC/EXP/CA.** Staff must type the owner-assigned
    number. A later version could look up "next free number" or match a
    known model.

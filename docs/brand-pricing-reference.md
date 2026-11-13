@@ -1,3 +1,5 @@
+> Mirror of `globaltimecollection-accounting/docs/brand-pricing-reference.md` at `4634f6b`. The accounting repo is the source of truth; re-copy it when it changes.
+
 # Brand pricing reference
 
 Source: `Daftar_Harga_per_Merk_20250906_v1.xlsx` (sheet `DAFTAR HARGA`, last
@@ -30,8 +32,7 @@ Harga Jual Grosir (wholesale) = HJB × (1 − DJG)
 |---|---|---|---|---|
 | Alexandre Christie | AC | 47%+10% | 20–40% | 45–47% |
 | Expedition | EXP | 50%+10% | 25–40% | 50% |
-| Seiko (Watch) | SK | 30%+3%+2% | 10–15% | 30% |
-| Seiko JD (Clock) | SKP | **30%+3%+2% (corrected — now matches Seiko Watch, not the original 10%+3%+2%)** | +Rp50,000–100,000 flat, not % — unchanged, not confirmed to have moved | 10% — unchanged, not confirmed to have moved |
+| Seiko (Watch + Clock) | SK | 30%+3%+2% | 10–15% | 30% |
 | Alba | AL | **30%+3%+2% (corrected — matches Seiko Watch, not the original 10%+3%+2%)** | **HJB +30% first, then −DJE** (not a plain discount off HJB) | 10% |
 | Aigner | AIG | 40% | 20–30% | 35% |
 | Casio | CS | 42% | 20–30% | 40% |
@@ -109,3 +110,10 @@ not part of the brand markup mapping above.
 - ~~Seiko JD (Clock)'s scheme/rate~~ — resolved: Seiko Watch, Seiko JD, and
   Alba all use the same DB (30%+3%+2%, List scheme). The `master` sheet's
   `UP2` tag on Seiko JD was outdated.
+- ~~Seiko JD (Clock) as its own Brand, with different DJE/DJG than Seiko
+  Watch~~ — retired by owner decision: Seiko JD is no longer a separate
+  Brand at all. A Seiko clock uses the plain "Seiko" brand/pricing above;
+  "JD" is now a fixed literal in the Clock name pattern (see
+  docs/product-naming-convention.md), not a brand distinction. The
+  different wholesale/retail numbers this row used to carry are dropped,
+  not preserved elsewhere.

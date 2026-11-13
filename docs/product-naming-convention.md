@@ -1,3 +1,5 @@
+> Mirror of `globaltimecollection-accounting/docs/product-naming-convention.md` at `4634f6b`. The accounting repo is the source of truth; re-copy it when it changes.
+
 # Product naming & coding convention
 
 Reverse-engineered from `Upload_Barang_List_v0.1.6.xlsx`'s live Excel
@@ -117,16 +119,24 @@ not a placeholder.
 
 **Clock**:
 ```
-{Brand} JD Bd {Case Color Code} - {Price Cipher Code}
+{Brand} JD {SKU / Ref Code} Bd {Case Color Code} - {Price Cipher Code}
 ```
 No strap fields (clocks don't have straps), no Gender, no Unique
-Descriptor shown in what's been confirmed so far.
+Descriptor shown in what's been confirmed so far. "JD" is a fixed,
+permanent token like "Bd" — not derived from the brand's name. Seiko
+clocks (formerly modeled as a separate "Seiko JD" brand/pricing) are
+just brand "Seiko"; "JD" supplies the clock marker, so Seiko isn't typed
+in twice. Unlike the Watch pattern, {SKU / Ref Code} — the item's own
+manufacturer SKU, or a self-invented brand's ref code — is printed
+directly in the name here, not just stored internally.
 
-Confirmed: the AC/EXP/CA self-invented reference number does **not**
-appear in the printed name at all — it lives only in the internal SKU/
-`Kode Barang` field, below. The manufacturer SKU shown for other brands is
-externally meaningful (a customer or supplier can look it up); the
-self-invented number for AC/EXP/CA is purely internal bookkeeping.
+Confirmed: for the **Watch** pattern, the AC/EXP/CA self-invented
+reference number does **not** appear in the printed name at all — it
+lives only in the internal SKU/`Kode Barang` field, below. The
+manufacturer SKU shown for other brands is externally meaningful (a
+customer or supplier can look it up); the self-invented number for
+AC/EXP/CA is purely internal bookkeeping. The Clock pattern above is the
+one exception: its {SKU / Ref Code} is printed in the name too.
 
 ## Unique Descriptor
 
