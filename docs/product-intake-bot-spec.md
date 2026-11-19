@@ -79,6 +79,29 @@ Also settled from the accounting session:
   `4634f6b`): "JD" is fixed text and the clock's own SKU is printed. "Seiko
   JD" is no longer a brand; Seiko clocks are brand Seiko with Seiko pricing.
 
+## Reference code = product master key (owner decision 2026-11-20)
+
+| Item | Reference (Kode Barang, `Product.sku`) |
+|---|---|
+| Every brand except AC/EXP/CA, watches **and** clocks; also AC/EXP/CA clocks | Manufacturer SKU, e.g. `SRPD53K1` |
+| AC/EXP/CA watches | Built code `{Brand}{Ref}{Strap}{StrapColor#}C{CaseColor#}{Gender}`, e.g. `AC1007SS02C02G` |
+| ...when that isn't unique | Plus the descriptor, e.g. `AC1007SS02C02Gdi04` |
+
+The accounting importer checks the reference against the **product master
+only**: found means restock, not found means a new product.
+
+The descriptor is part of the reference and comes from the photo, so the
+**bot** picks the reference before import, using the accounting app's
+read-only API (`intake_bot/master.py` has the contract):
+`GET /api/intake/products?sku_prefix=AC1007SS02C02G` (Bearer token).
+- No product with that base: **new** product, no descriptor.
+- One product, or the seen dial (and index) matches one variant
+  (descriptor parsed from the SKU, e.g. `di04` = Blue): **restock** of it.
+- Otherwise: staff **pick** from buttons listing the existing variants plus
+  "new …di<seen dial>". No ✅ until they do.
+- Manufacturer-SKU items: shown as restock or new.
+- API not configured or not reachable: falls back to the sheet's month tabs.
+
 ## Non-goals (v1)
 
 - Writing to the accounting database or API.

@@ -83,6 +83,9 @@ class ItemFields(BaseModel):
     # What Claude saw; NOT import columns (dial_color/index_type are the descriptor).
     photo_dial_color: Optional[str] = None
     photo_index_type: Optional[str] = None
+    # Staff picked the existing product without descriptor (base reference)
+    # from the bot's "which one?" buttons.
+    reference_choice: Optional[str] = None
     uncertain: list[str] = Field(default_factory=list, description="Field names the model is not confident about.")
     notes: Optional[str] = None
 

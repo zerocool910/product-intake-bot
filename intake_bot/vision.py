@@ -86,7 +86,7 @@ class PhotoFields(BaseModel):
 
 _TEXT_FIELDS = ("brand", "strap_type", "strap_color", "case_color", "gender", "dial_color", "index_type",
                 "crown_color", "ref_code", "manufacturer_sku", "category", "photo_dial_color",
-                "photo_index_type", "notes")
+                "photo_index_type", "reference_choice", "notes")
 _NUMBER_FIELDS = ("supplied_price", "selling_price", "cost_price")
 
 
@@ -111,6 +111,7 @@ class CorrectionFields(BaseModel):
     category: str
     photo_dial_color: str
     photo_index_type: str
+    reference_choice: str
     uncertain: list[str]
     notes: str
 

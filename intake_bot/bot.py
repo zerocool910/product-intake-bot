@@ -21,6 +21,7 @@ from .caption import apply_sale_price, parse_caption
 from .catalog import Catalog
 from .config import Settings
 from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_rows, to_import_row
+from .master import MasterUnavailable, ProductMaster, base_reference, match, parse_descriptor
 from .naming import decode_cipher
 from .sheet import Sheet
 from .store import Intake, Store
@@ -44,8 +45,10 @@ HELP = (
 
 
 class IntakeBot:
-    def __init__(self, settings: Settings, catalog: Catalog, store: Store, vision: Vision, sheet: Sheet):
+    def __init__(self, settings: Settings, catalog: Catalog, store: Store, vision: Vision, sheet: Sheet,
+                 master: ProductMaster | None = None):
         self.s, self.catalog, self.store, self.vision, self.sheet = settings, catalog, store, vision, sheet
+        self.master = master
         self.photo_dir = settings.data_dir / "photos"
         self.photo_dir.mkdir(parents=True, exist_ok=True)
         self._albums: dict[str, list[Message]] = {}
@@ -140,9 +143,17 @@ class IntakeBot:
             await query.answer()
             return
         action, intake_id = query.data.split(":", 1)
+        picked = None
+        if action == "pick":
+            intake_id, picked = intake_id.split(":", 1)
         intake = self.store.get(intake_id)
         if not intake or intake.status != "pending":
             await query.answer("Already handled.")
+            return
+
+        if action == "pick":
+            await query.answer("Got it.")
+            await self._apply_pick(query.message, intake, picked)
             return
 
         if action == "cancel":
@@ -197,11 +208,70 @@ class IntakeBot:
         await query.edit_message_reply_markup(None)
         await query.message.reply_text(f"{text}\n{r.name or ''}")
 
+    async def _apply_pick(self, message: Message, intake: Intake, picked: str) -> None:
+        """Staff chose which existing product (or a new variant) this is."""
+        f = intake.fields
+        base = base_reference(self.catalog, f) or ""
+        data = f.model_dump()
+        sku = picked[len("new: "):] if picked.startswith("new: ") else picked
+        parsed = parse_descriptor(self.catalog, sku[len(base):]) if sku.upper().startswith(base.upper()) else None
+        if parsed is None:
+            await message.reply_text("That choice no longer fits this item. Please check the details again.")
+            return
+        dial, index, crown = parsed
+        data.update(dial_color=dial.name if dial else None, index_type=index.name if index else None,
+                    crown_color=crown.name if crown else None,
+                    reference_choice=sku if dial is None else None)
+        self.store.update(intake.id, fields=ItemFields(**data))
+        await self._send_summary(message, self.store.get(intake.id))
+
     # ---------- summary ----------
 
+    async def _resolve_reference(self, intake: Intake) -> tuple[Intake, str | None, list[str]]:
+        """Which product is this? Returns (intake, note, options). `options`
+        is non-empty when staff must pick the product (no Confirm until then).
+
+        With the accounting API configured, checks the product master: the
+        importer restocks a reference it finds there and creates one it
+        doesn't, so for AC/EXP/CA the descriptor (part of the reference) must
+        be chosen here. Without it, falls back to the sheet's month tabs."""
+        f = intake.fields
+        if not review(self.catalog, f).ok:
+            return intake, None, []
+        if self.master:
+            try:
+                base = base_reference(self.catalog, f)
+                if base:
+                    products = await asyncio.to_thread(self.master.by_prefix, base)
+                    m = match(self.catalog, f, products, base)
+                    if m.fields != f:
+                        self.store.update(intake.id, fields=m.fields)
+                        intake = self.store.get(intake.id)
+                    if m.kind == "choose":
+                        return intake, ("❔ <b>Which product is this?</b> Several existing AC/EXP/CA variants "
+                                        "share this ref and strap/colors. Pick one below, or reply with its "
+                                        "dial (e.g. \"dial blue\")."), m.options
+                    return intake, m.note, []
+                sku = review(self.catalog, f).sku
+                if sku:
+                    products = await asyncio.to_thread(self.master.by_prefix, sku)
+                    hit = next((p for p in products if p.sku.upper() == sku.upper()), None)
+                    if hit:
+                        qty = f", stock {hit.stock_quantity:g}" if isinstance(hit.stock_quantity, (int, float)) else ""
+                        return intake, f"📦 Restock of existing <code>{html.escape(hit.sku)}</code>{qty}.", []
+                    return intake, f"🆕 New product <code>{html.escape(sku)}</code>.", []
+                return intake, None, []
+            except MasterUnavailable as e:
+                log.warning("%s; falling back to the sheet", e)
+                fallback = "⚠️ Product master not reachable; checked this sheet's history instead."
+        else:
+            fallback = None
+        intake, note = await self._apply_auto_descriptor(intake)
+        return intake, " ".join(x for x in (fallback, note) if x) or None, []
+
     async def _apply_auto_descriptor(self, intake: Intake) -> tuple[Intake, str | None]:
-        """If this item would print the same name as a row already in the
-        sheet, add a Unique Descriptor from what Claude saw (dial, then index)."""
+        """Fallback without the product master: if this item would print the
+        same name as a row in the sheet, add a descriptor from what Claude saw."""
         if not review(self.catalog, intake.fields).ok or intake.fields.dial_color:
             return intake, None
         try:
@@ -218,7 +288,7 @@ class IntakeBot:
         return self.store.get(intake.id), f"🔹 Added descriptor <code>{html.escape(text)}</code>: {html.escape(ids)} would otherwise print the same name."
 
     async def _send_summary(self, reply_to: Message, intake: Intake) -> None:
-        intake, descriptor_note = await self._apply_auto_descriptor(intake)
+        intake, descriptor_note, choices = await self._resolve_reference(intake)
         f = intake.fields
         r = review(self.catalog, f)
         e = html.escape
@@ -261,7 +331,7 @@ class IntakeBot:
             if hint:
                 lines.append(hint)
         same_sku: list = []
-        if r.ok:
+        if r.ok and not choices:
             try:
                 same_sku = await asyncio.to_thread(self.sheet.same_sku_today, r.sku or "")
                 dupes = await asyncio.to_thread(self.sheet.similar, to_import_row(self.catalog, f))
@@ -273,7 +343,7 @@ class IntakeBot:
                 lines.append(f"🔁 SKU {e(r.sku)} was already received <b>today</b> ({e(str(prev.get('intake_id', '?')))}, "
                              f"{e(str(prev.get('quantity', '?')))} pcs). <b>Replace</b> if it's the same item logged "
                              f"twice; <b>Add qty</b> if it's another unit.")
-            elif dupes:
+            elif dupes and not self.master:
                 last = dupes[-1]
                 lines.append(f"⚠️ Same name as {e(str(last.get('intake_id', '?')))} (received "
                              f"{e(str(last.get('receipt_date') or last.get('_tab', '?')))}). Same model → this is a "
@@ -288,7 +358,10 @@ class IntakeBot:
         lines.append("\nReply to this message to correct anything.")
 
         buttons = [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{intake.id}")]]
-        if r.ok and same_sku:
+        if r.ok and choices:
+            buttons = [[InlineKeyboardButton(opt.replace("new: ", "🆕 "), callback_data=f"pick:{intake.id}:{opt}")]
+                       for opt in choices] + buttons
+        elif r.ok and same_sku:
             buttons[0][:0] = [InlineKeyboardButton("🔁 Replace", callback_data=f"replace:{intake.id}"),
                               InlineKeyboardButton("➕ Add qty", callback_data=f"addqty:{intake.id}")]
         elif r.ok:
@@ -335,7 +408,11 @@ def build_application(settings: Settings) -> Application:
     store = Store(settings.data_dir / "intake.sqlite3")
     vision = Vision(catalog, settings.claude_model)
     sheet = Sheet(settings.google_credentials_file, settings.spreadsheet_id, settings.worksheet, settings.timezone)
-    bot = IntakeBot(settings, catalog, store, vision, sheet)
+    master = (ProductMaster(settings.accounting_api_url, settings.accounting_api_token)
+              if settings.accounting_api_url and settings.accounting_api_token else None)
+    if not master:
+        log.warning("ACCOUNTING_API_URL/TOKEN not set: checking restocks against the sheet only")
+    bot = IntakeBot(settings, catalog, store, vision, sheet, master)
     try:
         sheet.write_guide(sample_rows(catalog))
     except Exception:  # the guide is a convenience; never block startup on it

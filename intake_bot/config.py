@@ -21,6 +21,8 @@ class Settings:
     worksheet: str
     timezone: str
     data_dir: Path
+    accounting_api_url: str = ""
+    accounting_api_token: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -45,4 +47,6 @@ class Settings:
             worksheet=os.environ.get("SHEET_WORKSHEET", "Intake"),
             timezone=os.environ.get("TIMEZONE", "Asia/Jakarta"),
             data_dir=Path(os.environ.get("DATA_DIR", ROOT / "data")),
+            accounting_api_url=os.environ.get("ACCOUNTING_API_URL", "").strip(),
+            accounting_api_token=os.environ.get("ACCOUNTING_API_TOKEN", "").strip(),
         )
