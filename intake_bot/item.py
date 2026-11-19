@@ -26,7 +26,7 @@ IMPORT_COLUMNS = [
 # New columns go at the END so an existing sheet's header is a prefix of
 # this one and can be extended in place without shifting old rows.
 AUDIT_COLUMNS = ["intake_id", "logged_by", "logged_at", "photos", "preview_name", "preview_sku", "notes",
-                 "photo_dial_color", "photo_index_type"]
+                 "photo_dial_color", "photo_index_type", "receipt_date"]
 DEFAULT_QUANTITY = 1  # staff photograph an item in hand (owner decision 2026-11-19)
 
 # One line per column: (filled by, required, meaning, used by the importer?).
@@ -56,7 +56,8 @@ LEGEND: dict[str, tuple[str, str, str, bool]] = {
     "preview_sku": ("Bot", "", "SKU (Kode Barang) the accounting app will use.", False),
     "photo_dial_color": ("Claude", "", "Dial color seen in the photo. Info only; used for the automatic descriptor.", False),
     "photo_index_type": ("Claude", "", "Index style seen in the photo. Info only; used for the automatic descriptor.", False),
-    "notes": ("Claude / bot", "", "Free notes, e.g. tag cipher seen.", False),
+    "notes": ("Claude / bot", "", "Free notes, e.g. tag cipher seen, [replaces …], +N qty (…).", False),
+    "receipt_date": ("Bot", "", "Date the goods were received (local time). Same SKU on the same date: Replace or Add qty; a later date is a new receipt.", False),
 }
 
 
@@ -291,7 +292,7 @@ def sample_rows(catalog: Catalog) -> list[tuple[str, dict[str, object]]]:
     for label, f in cases:
         r = review(catalog, f)
         row = to_import_row(catalog, f)
-        row.update({"preview_name": r.name or "", "preview_sku": r.sku or "",
+        row.update({"preview_name": r.name or "", "preview_sku": r.sku or "", "receipt_date": "2026-11-19",
                     "photo_dial_color": f.photo_dial_color or "", "photo_index_type": f.photo_index_type or ""})
         out.append((label, row))
     return out

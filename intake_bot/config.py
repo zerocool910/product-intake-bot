@@ -19,6 +19,7 @@ class Settings:
     google_credentials_file: str
     spreadsheet_id: str
     worksheet: str
+    timezone: str
     data_dir: Path
 
     @classmethod
@@ -42,5 +43,6 @@ class Settings:
             google_credentials_file=need("GOOGLE_SERVICE_ACCOUNT_FILE"),
             spreadsheet_id=need("SHEET_ID"),
             worksheet=os.environ.get("SHEET_WORKSHEET", "Intake"),
+            timezone=os.environ.get("TIMEZONE", "Asia/Jakarta"),
             data_dir=Path(os.environ.get("DATA_DIR", ROOT / "data")),
         )

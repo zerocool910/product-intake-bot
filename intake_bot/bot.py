@@ -168,15 +168,34 @@ class IntakeBot:
             "notes": notes,
             "photo_dial_color": intake.fields.photo_dial_color or "",
             "photo_index_type": intake.fields.photo_index_type or "",
+            "receipt_date": self.sheet.today().isoformat(),
         })
-        # Goods receiving: every confirmation is its own receipt line, even for
-        # a SKU received before.
-        await asyncio.to_thread(self.sheet.save, row)
-        self.store.update(intake.id, status="confirmed")
+        qty = int(row.get("quantity") or 0)
+
+        # Same SKU already received TODAY -> staff chose Replace or Add qty.
+        # Look it up again now: the day may have changed since the summary.
+        today_rows = await asyncio.to_thread(self.sheet.same_sku_today, r.sku or "")
+        if action in ("replace", "addqty") and today_rows:
+            existing = today_rows[0]
+            if action == "replace":
+                row["notes"] = f"{row['notes']} [replaces {existing.get('intake_id', '?')}]".strip()
+                await asyncio.to_thread(self.sheet.replace, existing["_row"], row)
+                text = f"🔁 {intake.id} replaced today's {existing.get('intake_id', '?')} for {r.sku} ({qty} pcs)."
+            else:
+                new_qty = await asyncio.to_thread(self.sheet.add_quantity, existing, qty, f"+{qty} ({intake.id})")
+                text = f"➕ Added {qty} to today's {existing.get('intake_id', '?')} for {r.sku}: now {new_qty} pcs."
+            self.store.update(intake.id, status="merged" if action == "addqty" else "confirmed")
+        elif action == "confirm" and today_rows:
+            await query.answer("Already received today: choose Replace or Add qty.", show_alert=True)
+            return
+        else:
+            # New receipt line (a different date counts as a new receipt).
+            await asyncio.to_thread(self.sheet.append, row)
+            self.store.update(intake.id, status="confirmed")
+            text = f"✅ {intake.id} received ({qty} pcs) on {row['receipt_date']}, added to {self.sheet.tab_title()}."
         await query.answer("Saved.")
         await query.edit_message_reply_markup(None)
-        qty = row.get("quantity") or ""
-        await query.message.reply_text(f"✅ {intake.id} received ({qty} pcs) and added to the sheet.\n{r.name or ''}")
+        await query.message.reply_text(f"{text}\n{r.name or ''}")
 
     # ---------- summary ----------
 
@@ -244,16 +263,16 @@ class IntakeBot:
         same_sku: list = []
         if r.ok:
             try:
-                same_sku = await asyncio.to_thread(self.sheet.same_sku, r.sku or "")
+                same_sku = await asyncio.to_thread(self.sheet.same_sku_today, r.sku or "")
                 dupes = await asyncio.to_thread(self.sheet.similar, to_import_row(self.catalog, f))
             except Exception:  # sheet hiccups must not block the summary
                 log.exception("Duplicate check failed")
                 same_sku, dupes = [], []
             if same_sku:
-                ids = ", ".join(str(x.get("intake_id", "?")) for x in same_sku)
-                lines.append(f"🔁 SKU {e(r.sku)} was received before ({e(ids)}). "
-                             "✅ Confirm adds <b>another receipt line</b>; it doesn't change the earlier one. "
-                             "If this is the same delivery logged twice, press ❌ Cancel.")
+                prev = same_sku[0]
+                lines.append(f"🔁 SKU {e(r.sku)} was already received <b>today</b> ({e(str(prev.get('intake_id', '?')))}, "
+                             f"{e(str(prev.get('quantity', '?')))} pcs). <b>Replace</b> if it's the same item logged "
+                             f"twice; <b>Add qty</b> if it's another unit.")
             elif dupes:
                 lines.append(f"⚠️ {len(dupes)} item(s) in the sheet would print the same name. "
                              "If this is a different model, add a descriptor (e.g. \"dial blue\").")
@@ -267,7 +286,10 @@ class IntakeBot:
         lines.append("\nReply to this message to correct anything.")
 
         buttons = [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{intake.id}")]]
-        if r.ok:
+        if r.ok and same_sku:
+            buttons[0][:0] = [InlineKeyboardButton("🔁 Replace", callback_data=f"replace:{intake.id}"),
+                              InlineKeyboardButton("➕ Add qty", callback_data=f"addqty:{intake.id}")]
+        elif r.ok:
             buttons[0].insert(0, InlineKeyboardButton("✅ Confirm", callback_data=f"confirm:{intake.id}"))
         sent = await reply_to.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
                                          reply_markup=InlineKeyboardMarkup(buttons))
@@ -310,7 +332,7 @@ def build_application(settings: Settings) -> Application:
     catalog = Catalog.load()
     store = Store(settings.data_dir / "intake.sqlite3")
     vision = Vision(catalog, settings.claude_model)
-    sheet = Sheet(settings.google_credentials_file, settings.spreadsheet_id, settings.worksheet)
+    sheet = Sheet(settings.google_credentials_file, settings.spreadsheet_id, settings.worksheet, settings.timezone)
     bot = IntakeBot(settings, catalog, store, vision, sheet)
     try:
         sheet.write_guide(sample_rows(catalog))

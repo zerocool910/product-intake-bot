@@ -74,6 +74,6 @@ class FakeWS:
 
 def test_old_header_is_extended_in_place():
     old = HEADER[: HEADER.index("notes") + 1]
-    s = object.__new__(Sheet); s.ws = FakeWS(old, len(old))
-    s._ensure_header()
-    assert s.ws.cells[1] == HEADER and s.ws.col_count >= len(HEADER)
+    ws = FakeWS(old, len(old))
+    Sheet._ensure_header(ws)
+    assert ws.cells[1] == HEADER and ws.col_count >= len(HEADER)

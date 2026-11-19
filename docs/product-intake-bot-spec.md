@@ -119,15 +119,20 @@ Also settled from the accounting session:
    There is no rounding rule, and the cipher just truncates.
 6. **Photo backup / off-box storage.** Photos live on the VPS disk under
    `data/`. Back that folder up, or add cloud storage later.
-7. **The bot is goods receiving** (owner decision 2026-11-19). Stock comes
+7. **The bot is goods receiving** (owner decisions 2026-11-19). Stock comes
    from two sources: receipts (this bot) and purchase invoices, and the
    purchase invoice is made *from* receipts, so stock isn't counted twice.
-   Each ✅ Confirm is its own receipt row, even for a SKU received before
-   (the bot says "received before … adds another receipt line"). Supplier
-   and delivery-note number are not collected by the bot; whoever makes the
-   purchase invoice in accounting picks the receipts it covers.
-   **Accounting side, not done yet:** a Receiving record, "purchase invoice
-   from receipts", and the importer accepting an existing SKU as a new
-   receipt (today it rejects SKUs that already exist or repeat in a file).
+   - **One tab per month** (`Intake 2026-11`): when the month changes the
+     bot starts a new tab, and the old one stays as the record. Every row
+     has a `receipt_date` (in `TIMEZONE`, default Asia/Jakarta).
+   - **Same SKU on the same date:** staff choose 🔁 Replace (same item
+     logged twice; notes `[replaces …]`) or ➕ Add qty (another unit; notes
+     `+N (…)`). **A later date is a new receipt**, with no check.
+   - Supplier and delivery-note number are not collected by the bot.
+   - **Accounting side, not done yet:** a Receiving record, purchase invoice
+     from receipts, the importer accepting an existing SKU as a new receipt,
+     and skipping `intake_id`s it has already imported. Import a day's rows
+     after that day is over: a same-day Replace or Add qty made after the
+     import would otherwise be skipped as already imported.
 8. **Direct sheet → importer path** (skipping the `.xlsx` export), if `#1`
    ever reads Google Sheets.

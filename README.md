@@ -99,9 +99,9 @@ pending/confirmed items.
 
 ## Importing into accounting
 
-Open the sheet → the `Intake` tab → File → Download → Microsoft Excel →
+Open the sheet → this month's tab (e.g. `Intake 2026-11`) → File → Download → Microsoft Excel →
 upload at `/products-import`. The importer only reads the **active** tab,
-so have `Intake` selected when you download. The audit columns after the
+so have the month tab (e.g. `Intake 2026-11`) selected when you download. The audit columns after the
 import columns (`intake_id` … `notes`) are for people, and the importer
 ignores them.
 
