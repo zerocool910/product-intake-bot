@@ -20,7 +20,7 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, Con
 from .caption import apply_sale_price, parse_caption
 from .catalog import Catalog
 from .config import Settings
-from .item import ItemFields, review, to_import_row
+from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_rows, to_import_row
 from .naming import decode_cipher
 from .sheet import Sheet
 from .store import Intake, Store
@@ -166,6 +166,8 @@ class IntakeBot:
             "preview_name": r.name or "",
             "preview_sku": r.sku or "",
             "notes": notes,
+            "photo_dial_color": intake.fields.photo_dial_color or "",
+            "photo_index_type": intake.fields.photo_index_type or "",
         })
         # Same SKU already in the sheet -> this row replaces it (owner's rule:
         # Confirm overwrites, Cancel leaves the sheet alone).
@@ -188,7 +190,26 @@ class IntakeBot:
 
     # ---------- summary ----------
 
+    async def _apply_auto_descriptor(self, intake: Intake) -> tuple[Intake, str | None]:
+        """If this item would print the same name as a row already in the
+        sheet, add a Unique Descriptor from what Claude saw (dial, then index)."""
+        if not review(self.catalog, intake.fields).ok or intake.fields.dial_color:
+            return intake, None
+        try:
+            clashes = await asyncio.to_thread(self.sheet.similar, to_import_row(self.catalog, intake.fields))
+        except Exception:
+            log.exception("Duplicate-name check failed")
+            return intake, None
+        result = auto_descriptor(self.catalog, intake.fields, clashes)
+        if not result:
+            return intake, None
+        fields, text = result
+        self.store.update(intake.id, fields=fields)
+        ids = ", ".join(str(c.get("intake_id", "?")) for c in clashes)
+        return self.store.get(intake.id), f"🔹 Added descriptor <code>{html.escape(text)}</code>: {html.escape(ids)} would otherwise print the same name."
+
     async def _send_summary(self, reply_to: Message, intake: Intake) -> None:
+        intake, descriptor_note = await self._apply_auto_descriptor(intake)
         f = intake.fields
         r = review(self.catalog, f)
         e = html.escape
@@ -213,8 +234,11 @@ class IntakeBot:
             lines.append(line("Supplied price", f"Rp{f.supplied_price:,.0f}"))
         if f.selling_price:
             lines.append(line("Selling price", f"Rp{f.selling_price:,.0f}"))
-        if f.quantity:
-            lines.append(line("Qty", f.quantity))
+        lines.append(line("Qty", f.quantity) if f.quantity is not None else f"Qty: <b>{DEFAULT_QUANTITY}</b> (default)")
+        seen = " · ".join(x for x in (f.photo_dial_color and f"dial {f.photo_dial_color}",
+                                      f.photo_index_type and f"{f.photo_index_type} index") if x)
+        if seen:
+            lines.append(f"👁 Seen: {e(seen)}")
         if r.hjb:
             hbb = f"HBB Rp{r.hbb:,.0f} · " if r.hbb is not None else ""
             lines.append(f"💰 {hbb}HJB Rp{r.hjb:,.0f}")
@@ -242,6 +266,8 @@ class IntakeBot:
             elif dupes:
                 lines.append(f"⚠️ {len(dupes)} item(s) in the sheet would print the same name. "
                              "If this is a different model, add a descriptor (e.g. \"dial blue\").")
+        if descriptor_note:
+            lines.append(descriptor_note)
         if f.uncertain:
             lines.append("❓ = not sure from the photo, please check.")
         if r.errors:
@@ -296,6 +322,10 @@ def build_application(settings: Settings) -> Application:
     vision = Vision(catalog, settings.claude_model)
     sheet = Sheet(settings.google_credentials_file, settings.spreadsheet_id, settings.worksheet)
     bot = IntakeBot(settings, catalog, store, vision, sheet)
+    try:
+        sheet.write_guide(sample_rows(catalog))
+    except Exception:  # the guide is a convenience; never block startup on it
+        log.exception("Couldn't write the Legend tab / header notes")
 
     # Telegram's default 5 s read timeout is too short for file downloads on
     # slower routes; a lost photo is worse than a slow one.

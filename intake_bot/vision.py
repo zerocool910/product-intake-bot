@@ -53,8 +53,8 @@ How to fill the fields:
 caseback, or box in the photo. Copy it exactly.
 - Price tags in this shop show a letter cipher (e.g. "EBB"). If you see one, copy the letters \
 into notes as "tag cipher: EBB". Do not try to decode it.
-- Mention the dial color and index style in notes — \
-staff add these only when two items would otherwise share a name.
+- dial_color and index_type: the dial's color and the hour-marker style (Numeral, Baton, Roman), \
+if you can see them. Null if not visible or not in the list.
 - Never fill gender, prices, quantity, ref_code or category. Those come from staff, not the photo.
 - Put every field you filled but are not sure about into `uncertain`. A wrong value that looks right \
 ends up printed on a tag, so leaving a field null or marking it uncertain is always better than guessing.
@@ -70,7 +70,7 @@ def _effort_config(effort: str) -> dict:
 # All fields are required (no defaults) so Claude always answers each one.
 
 class PhotoFields(BaseModel):
-    """Only what a photo can show. 6 nullable fields."""
+    """Only what a photo can show. 8 nullable fields."""
 
     type: Optional[Literal["watch", "clock"]]
     brand: Optional[str]
@@ -78,12 +78,15 @@ class PhotoFields(BaseModel):
     strap_color: Optional[str]
     case_color: Optional[str]
     manufacturer_sku: Optional[str]
+    dial_color: Optional[str]
+    index_type: Optional[str]
     uncertain: list[str]
     notes: str
 
 
 _TEXT_FIELDS = ("brand", "strap_type", "strap_color", "case_color", "gender", "dial_color", "index_type",
-                "crown_color", "ref_code", "manufacturer_sku", "category", "notes")
+                "crown_color", "ref_code", "manufacturer_sku", "category", "photo_dial_color",
+                "photo_index_type", "notes")
 _NUMBER_FIELDS = ("supplied_price", "selling_price", "cost_price")
 
 
@@ -106,6 +109,8 @@ class CorrectionFields(BaseModel):
     cost_price: float
     quantity: int
     category: str
+    photo_dial_color: str
+    photo_index_type: str
     uncertain: list[str]
     notes: str
 
@@ -171,6 +176,9 @@ class Vision:
         # PhotoFields has no gender/price/qty/ref fields, so those can't come from
         # the photo; also drop them from `uncertain` in case Claude lists them.
         data = photo.model_dump()
+        # Seen dial/index are info, not the import's descriptor columns.
+        data["photo_dial_color"] = data.pop("dial_color")
+        data["photo_index_type"] = data.pop("index_type")
         data["uncertain"] = [u for u in data["uncertain"] if u not in NOT_FROM_PHOTO]
         data["notes"] = data["notes"] or None
         return ItemFields(**data)

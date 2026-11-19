@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 
 import gspread
+from gspread.utils import rowcol_to_a1
 
-from .item import AUDIT_COLUMNS, IMPORT_COLUMNS
+from .item import AUDIT_COLUMNS, IMPORT_COLUMNS, LEGEND
 
 log = logging.getLogger(__name__)
 HEADER = IMPORT_COLUMNS + AUDIT_COLUMNS
@@ -25,16 +26,60 @@ class Sheet:
             self.ws = book.worksheet(worksheet)
         except gspread.WorksheetNotFound:
             self.ws = book.add_worksheet(title=worksheet, rows=1000, cols=len(HEADER))
+        self.book = book
         self._ensure_header()
 
     def _ensure_header(self) -> None:
+        if self.ws.col_count < len(HEADER):
+            self.ws.add_cols(len(HEADER) - self.ws.col_count)
         first = self.ws.row_values(1)
         if not first:
-            self.ws.append_row(HEADER, value_input_option="RAW")
+            self.ws.update(values=[HEADER], range_name="A1", value_input_option="RAW")
+        elif first == HEADER[: len(first)] and len(first) < len(HEADER):
+            # Older header (fewer audit columns): extend it in place.
+            self.ws.update(values=[HEADER], range_name="A1", value_input_option="RAW")
+            log.info("Added columns %s to %r", HEADER[len(first):], self.ws.title)
         elif first[: len(HEADER)] != HEADER:
             raise RuntimeError(
                 f"Worksheet {self.ws.title!r} has an unexpected header row. "
                 f"Expected: {HEADER}. Fix the sheet or point SHEET_WORKSHEET at a new tab.")
+
+    def write_guide(self, samples: list[tuple[str, dict]]) -> None:
+        """Hover notes on the Intake header cells, and a Legend tab explaining
+        every column with worked sample rows. Rewritten at every start; never
+        touches the data rows. The importer only reads the active tab, so the
+        Legend tab doesn't affect imports as long as Intake is selected."""
+        self.ws.update_notes({rowcol_to_a1(1, n): self._note(col) for n, col in enumerate(HEADER, start=1)})
+        self.ws.freeze(rows=1)
+
+        title = "Legend"
+        try:
+            guide = self.book.worksheet(title)
+            guide.clear()
+        except gspread.WorksheetNotFound:
+            guide = self.book.add_worksheet(title=title, rows=100, cols=len(HEADER) + 1)
+        rows: list[list] = [
+            [f"How to read the {self.ws.title!r} tab. Written by the bot; edits here are overwritten."],
+            ["Download the .xlsx with the Intake tab selected: the importer reads only the active tab, "
+             "and only the import columns (the bot's columns after them are ignored)."],
+            [],
+            ["Column", "Used by import?", "Required", "Filled by", "Meaning"],
+        ]
+        for col in HEADER:
+            filled_by, required, meaning, imported = LEGEND[col]
+            rows.append([col, "Yes" if imported else "No (bot info)", required, filled_by, meaning])
+        rows += [[], ["Sample output (what the bot writes for these cases)"], ["Case"] + HEADER]
+        rows += [[label] + [row.get(c, "") for c in HEADER] for label, row in samples]
+        guide.update(values=rows, range_name="A1", value_input_option="RAW")
+        guide.format("A4:E4", {"textFormat": {"bold": True}})
+        guide.format(f"A{len(HEADER) + 7}:{rowcol_to_a1(len(HEADER) + 7, len(HEADER) + 1)}", {"textFormat": {"bold": True}})
+
+    @staticmethod
+    def _note(col: str) -> str:
+        filled_by, required, meaning, imported = LEGEND[col]
+        req = f"Required: {required}. " if required else ""
+        kind = "" if imported else "Bot info (not imported). "
+        return f"{kind}{req}Filled by: {filled_by}.\n{meaning}"
 
     def append(self, row: dict[str, object]) -> None:
         self.ws.append_row([row.get(c, "") for c in HEADER], value_input_option="RAW")
