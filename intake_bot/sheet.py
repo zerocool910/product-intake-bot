@@ -14,6 +14,7 @@ template; the bot's own columns come after them. Download a month tab as
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -91,6 +92,15 @@ class Sheet:
         return [{**r, "_row": i + 2}  # +1 header row, +1 because rows are 1-based
                 for i, r in enumerate(ws.get_all_records(expected_headers=HEADER))]
 
+    def _history(self) -> list[dict]:
+        """Rows from ALL month tabs ("<prefix> YYYY-MM"), oldest first, each
+        with "_tab". Used where a decision depends on earlier months too."""
+        pattern = re.compile(rf"^{re.escape(self.prefix)} \d{{4}}-\d{{2}}$")
+        rows: list[dict] = []
+        for ws in sorted((w for w in self.book.worksheets() if pattern.match(w.title)), key=lambda w: w.title):
+            rows += [{**r, "_tab": ws.title} for r in ws.get_all_records(expected_headers=HEADER)]
+        return rows
+
     def same_sku_today(self, sku: str) -> list[dict]:
         """Rows received TODAY with this SKU. Earlier dates are separate receipts
         and aren't checked."""
@@ -102,12 +112,15 @@ class Sheet:
                 and str(r.get("receipt_date", "")) == today]
 
     def similar(self, row: dict[str, object]) -> list[dict]:
-        """This month's rows that would print the same name: same brand, SKU /
-        ref code, strap, strap color, case (+ descriptor). In practice AC/EXP/CA
-        models sharing a ref code; one of them needs a Unique Descriptor."""
+        """Rows in ANY month tab that would print the same name: same brand,
+        SKU / ref code, strap, strap color, case (+ descriptor). In practice
+        AC/EXP/CA models sharing a ref code. All months, not just this one:
+        accounting treats a repeat SKU as a restock, so a model whose
+        look-alike was received in an earlier month must still get its
+        descriptor, or its stock lands on the other model."""
         keys = ("type", "brand", "ref_code", "manufacturer_sku", "strap_type", "strap_color", "case_color",
                 "dial_color", "index_type", "crown_color")
-        return [r for r in self._records()
+        return [r for r in self._history()
                 if all(str(r.get(k, "")).lower() == str(row.get(k, "")).lower() for k in keys)]
 
     # ---------- writes ----------

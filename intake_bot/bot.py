@@ -274,8 +274,10 @@ class IntakeBot:
                              f"{e(str(prev.get('quantity', '?')))} pcs). <b>Replace</b> if it's the same item logged "
                              f"twice; <b>Add qty</b> if it's another unit.")
             elif dupes:
-                lines.append(f"⚠️ {len(dupes)} item(s) in the sheet would print the same name. "
-                             "If this is a different model, add a descriptor (e.g. \"dial blue\").")
+                last = dupes[-1]
+                lines.append(f"⚠️ Same name as {e(str(last.get('intake_id', '?')))} (received "
+                             f"{e(str(last.get('receipt_date') or last.get('_tab', '?')))}). Same model → this is a "
+                             "restock, fine. A different model → reply with a descriptor, e.g. \"dial blue\".")
         if descriptor_note:
             lines.append(descriptor_note)
         if f.uncertain:

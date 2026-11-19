@@ -49,6 +49,9 @@ class FakeBook:
             raise gspread.WorksheetNotFound(title)
         return self.tabs[title]
 
+    def worksheets(self):
+        return list(self.tabs.values())
+
     def add_worksheet(self, title, rows, cols):
         self.tabs[title] = FakeWorksheet(title)
         return self.tabs[title]
@@ -103,3 +106,21 @@ def test_add_quantity_adds_to_the_row_and_notes_it():
     assert s.add_quantity(hit, 2, "+2 (second)") == 3
     [row] = s.current().get_all_records()
     assert (row["intake_id"], row["quantity"], row["notes"]) == ("first", 3, "+2 (second)")
+
+
+def test_name_clash_check_spans_earlier_months():
+    from intake_bot.catalog import Catalog
+    from intake_bot.item import ItemFields, auto_descriptor, to_import_row
+    C = Catalog.load()
+    ac = dict(type="watch", brand="Alexandre Christie", ref_code="1007", strap_type="Stainless St.",
+              strap_color="Black", case_color="Black", gender="Gents", supplied_price=950_000)
+    s = FakeSheet(date(2026, 11, 10))
+    s.append({**to_import_row(C, ItemFields(**ac)), "intake_id": "A-white", "photo_dial_color": "White",
+              "receipt_date": "2026-11-10"})
+    s.book.add_worksheet("Legend", 1, 1)          # not a month tab: ignored
+    s.day = date(2026, 12, 3)                      # new month, empty tab
+    blue = ItemFields(**ac, photo_dial_color="Blue")
+    clashes = s.similar(to_import_row(C, blue))
+    assert [c["intake_id"] for c in clashes] == ["A-white"]
+    new, text = auto_descriptor(C, blue, clashes)
+    assert text == "diBLU"                         # so its SKU differs from model A's

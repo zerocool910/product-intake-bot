@@ -129,10 +129,15 @@ Also settled from the accounting session:
      logged twice; notes `[replaces …]`) or ➕ Add qty (another unit; notes
      `+N (…)`). **A later date is a new receipt**, with no check.
    - Supplier and delivery-note number are not collected by the bot.
-   - **Accounting side, not done yet:** a Receiving record, purchase invoice
-     from receipts, the importer accepting an existing SKU as a new receipt,
-     and skipping `intake_id`s it has already imported. Import a day's rows
-     after that day is over: a same-day Replace or Add qty made after the
-     import would otherwise be skipped as already imported.
+   - **Accounting side:** done in `8855f72`: each row becomes a dated
+     Purchase (stock receipt); a repeat SKU is a restock; `intake_id`s
+     already imported and today's rows are skipped. **Not done yet:**
+     making the purchase invoice *from* these receipts. Until then, entering
+     a separate purchase invoice for goods already received through the bot
+     would add their stock twice.
+   - The name-clash / descriptor check looks at **all month tabs**, because
+     accounting matches restocks by SKU: an AC/EXP/CA model whose
+     look-alike was received in an earlier month must still get its
+     descriptor, or its stock lands on the other model.
 8. **Direct sheet → importer path** (skipping the `.xlsx` export), if `#1`
    ever reads Google Sheets.

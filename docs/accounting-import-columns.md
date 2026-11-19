@@ -1,7 +1,7 @@
 # Accounting import columns (mirror)
 
 **Source of truth:** `globaltimecollection-accounting/docs/product-import-template.md`
-and `app/Services/ProductImportService.php` (checked at `4634f6b`)
+and `app/Services/ProductImportService.php` (checked at `8855f72`)
 (the `/products-import` Excel importer). This is a copy so this repo is
 self-contained. If the accounting side changes, update this file,
 `IMPORT_COLUMNS` in `intake_bot/item.py`, and `review()` in the same file.
@@ -40,6 +40,19 @@ are recorded as stock receipts in accounting, not imported again.
 Known gaps on the accounting side (as of 2026-11-04): AC/EXP/CA **clocks**
 have no generated-SKU pattern yet, so they need `manufacturer_sku` set by
 hand. Barcode is not an import column yet.
+
+## Read by the importer since accounting `8855f72`
+
+- `intake_id`: stored on the Purchase the row creates. A row whose
+  `intake_id` was already imported is **skipped** ("already imported"), so
+  re-importing a whole month tab only adds new rows.
+- `receipt_date` (`YYYY-MM-DD`, Asia/Jakarta): the Purchase's date. A row
+  dated **today is skipped** ("day not closed yet"). The bot writes it as
+  plain text; if someone retypes a date by hand in Sheets it may turn into
+  a date cell and fail the strict format check.
+- A SKU that already exists is a **restock**: another dated Purchase on the
+  existing product, not an error. The importer reports
+  created / restocked / skipped / failed.
 
 ## What this bot adds
 
