@@ -120,9 +120,12 @@ Also settled from the accounting session:
 6. **Photo backup / off-box storage.** Photos live on the VPS disk under
    `data/`. Back that folder up, or add cloud storage later.
 7. **Restocks.** Since `dc919ae` the importer rejects a SKU that already
-   exists in accounting or repeats within the file. The bot warns when a
-   SKU is already in the staging sheet, but it can't see the accounting
-   catalog. More stock of an item that's already in accounting is a stock
+   exists in accounting or repeats within the file. When a SKU is already
+   in the staging sheet, the bot says so and **✅ Confirm replaces that row**
+   (notes record `[replaces <old intake_id>]`); ❌ Cancel leaves the sheet
+   as it is (owner rule, 2026-11-19). The bot can't see the accounting
+   catalog, and replacing a sheet row doesn't change a product that was
+   already imported. More stock of an item that's already in accounting is a stock
    receipt there, not a new import row.
 8. **Direct sheet → importer path** (skipping the `.xlsx` export), if `#1`
    ever reads Google Sheets.

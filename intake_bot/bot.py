@@ -156,6 +156,7 @@ class IntakeBot:
             await query.answer("Still has problems — see the list.", show_alert=True)
             return
         row = to_import_row(self.catalog, intake.fields)
+        notes = intake.fields.notes or ""
         row.update({
             "intake_id": intake.id,
             "logged_by": f"{intake.user_name} ({intake.user_id})",
@@ -163,13 +164,26 @@ class IntakeBot:
             "photos": ", ".join(intake.photos),
             "preview_name": r.name or "",
             "preview_sku": r.sku or "",
-            "notes": intake.fields.notes or "",
+            "notes": notes,
         })
-        await asyncio.to_thread(self.sheet.append, row)
+        # Same SKU already in the sheet -> this row replaces it (owner's rule:
+        # Confirm overwrites, Cancel leaves the sheet alone).
+        existing = await asyncio.to_thread(self.sheet.same_sku, r.sku or "")
+        if existing:
+            old_ids = ", ".join(str(m.get("intake_id", "?")) for m in existing)
+            row["notes"] = f"{notes} [replaces {old_ids}]".strip()
+        replaced = await asyncio.to_thread(self.sheet.save, row)
         self.store.update(intake.id, status="confirmed")
+        for old in replaced:
+            if old and old != intake.id and self.store.get(old):
+                self.store.update(old, status="replaced")
         await query.answer("Saved.")
         await query.edit_message_reply_markup(None)
-        await query.message.reply_text(f"✅ {intake.id} added to the sheet.\n{r.name or ''}")
+        if replaced:
+            await query.message.reply_text(
+                f"♻️ {intake.id} replaced {', '.join(replaced)} in the sheet (same SKU {r.sku}).\n{r.name or ''}")
+        else:
+            await query.message.reply_text(f"✅ {intake.id} added to the sheet.\n{r.name or ''}")
 
     # ---------- summary ----------
 
@@ -212,6 +226,7 @@ class IntakeBot:
             hint = self._tag_hint(f.notes, r.hjb)
             if hint:
                 lines.append(hint)
+        same_sku: list = []
         if r.ok:
             try:
                 same_sku = await asyncio.to_thread(self.sheet.same_sku, r.sku or "")
@@ -221,9 +236,8 @@ class IntakeBot:
                 same_sku, dupes = [], []
             if same_sku:
                 ids = ", ".join(str(x.get("intake_id", "?")) for x in same_sku)
-                lines.append(f"⛔ SKU {e(r.sku)} is already in the sheet ({e(ids)}). The import rejects "
-                             "repeated SKUs. If this is more stock of the same item, cancel this and add "
-                             "the qty to that row, or record it as a stock receipt in accounting.")
+                lines.append(f"♻️ SKU {e(r.sku)} is already in the sheet ({e(ids)}). "
+                             "<b>✅ Confirm replaces that row</b> with this one; ❌ Cancel leaves the sheet as it is.")
             elif dupes:
                 lines.append(f"⚠️ {len(dupes)} item(s) in the sheet would print the same name. "
                              "If this is a different model, add a descriptor (e.g. \"dial blue\").")
@@ -236,7 +250,8 @@ class IntakeBot:
 
         buttons = [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{intake.id}")]]
         if r.ok:
-            buttons[0].insert(0, InlineKeyboardButton("✅ Confirm", callback_data=f"confirm:{intake.id}"))
+            label = "✅ Confirm (replace)" if same_sku else "✅ Confirm"
+            buttons[0].insert(0, InlineKeyboardButton(label, callback_data=f"confirm:{intake.id}"))
         sent = await reply_to.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
                                          reply_markup=InlineKeyboardMarkup(buttons))
         if intake.message_id:
