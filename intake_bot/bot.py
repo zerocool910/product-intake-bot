@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.constants import ParseMode
+from telegram.error import TimedOut
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
@@ -262,6 +263,17 @@ class IntakeBot:
         return f"✔️ Tag {letters} matches the computed HJB."
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and tell the sender, instead of silently dropping their photo."""
+    log.error("Error while handling an update", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        reason = "Telegram was slow to respond" if isinstance(context.error, TimedOut) else "Something went wrong"
+        try:
+            await update.effective_message.reply_text(f"⚠️ {reason}. Nothing was saved — please send it again.")
+        except Exception:
+            log.exception("Couldn't send the error notice")
+
+
 def build_application(settings: Settings) -> Application:
     catalog = Catalog.load()
     store = Store(settings.data_dir / "intake.sqlite3")
@@ -269,9 +281,15 @@ def build_application(settings: Settings) -> Application:
     sheet = Sheet(settings.google_credentials_file, settings.spreadsheet_id, settings.worksheet)
     bot = IntakeBot(settings, catalog, store, vision, sheet)
 
-    app = Application.builder().token(settings.telegram_token).build()
+    # Telegram's default 5 s read timeout is too short for file downloads on
+    # slower routes; a lost photo is worse than a slow one.
+    app = (Application.builder().token(settings.telegram_token)
+           .connect_timeout(15).read_timeout(30).write_timeout(30).pool_timeout(15)
+           .get_updates_connect_timeout(15).get_updates_read_timeout(30)
+           .build())
     app.add_handler(CommandHandler(["start", "help"], bot.start))
     app.add_handler(MessageHandler(filters.PHOTO, bot.photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))
+    app.add_error_handler(on_error)
     return app
