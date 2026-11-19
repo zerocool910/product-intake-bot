@@ -110,10 +110,14 @@ code; there's nothing to look up, not a data gap.
 
 ## Name patterns
 
-**Watch**:
+**Watch** (owner update 2026-11-19, `{SKU}` added — **not yet in the
+accounting app as of `4634f6b`**; the bot already follows it):
 ```
-{Brand} {Strap Type Code} {Strap Color Code} Bd {Case Color Code} {Unique Descriptor}. {Gender} - {Price Cipher Code}
+{Brand} {SKU} {Strap Type Code} {Strap Color Code} Bd {Case Color Code} {Unique Descriptor}. {Gender} - {Price Cipher Code}
 ```
+`{SKU}` is the manufacturer SKU (e.g. `SRPD53K1`), or for AC/EXP/CA the
+owner's ref code (e.g. `1007`) — the same rule as the Clock pattern, not
+the long built `Kode Barang`. Example: `AC 1007 SS BLK Bd BLK. G - EMO`.
 "Bd" = short for *Bodi* (slang for Case/Body) — a fixed, permanent token,
 not a placeholder.
 
@@ -130,13 +134,14 @@ in twice. Unlike the Watch pattern, {SKU / Ref Code} — the item's own
 manufacturer SKU, or a self-invented brand's ref code — is printed
 directly in the name here, not just stored internally.
 
-Confirmed: for the **Watch** pattern, the AC/EXP/CA self-invented
+~~Confirmed: for the **Watch** pattern, the AC/EXP/CA self-invented
 reference number does **not** appear in the printed name at all — it
 lives only in the internal SKU/`Kode Barang` field, below. The
 manufacturer SKU shown for other brands is externally meaningful (a
 customer or supplier can look it up); the self-invented number for
 AC/EXP/CA is purely internal bookkeeping. The Clock pattern above is the
-one exception: its {SKU / Ref Code} is printed in the name too.
+one exception: its {SKU / Ref Code} is printed in the name too.~~
+Superseded 2026-11-19: both patterns now print the SKU / ref code.
 
 ## Unique Descriptor
 

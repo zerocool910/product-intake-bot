@@ -71,7 +71,7 @@ def test_generated_sku_matches_verified_example():
 
 def test_descriptor_in_name_and_sku():
     r = review(C, _watch(dial_color="Blue", index_type="Numeral", crown_color="Silver"))
-    assert r.name == "AC SS SIL Bd SIL diBLU-idxNUM-crSIL. G - EMO"
+    assert r.name == "AC AE1200 SS SIL Bd SIL diBLU-idxNUM-crSIL. G - EMO"
     assert r.sku == "ACAE1200SS18C18Gdi04idxNUMcr18"
 
 
@@ -80,8 +80,22 @@ def test_manufacturer_sku_brand_name():
                    gender="G", manufacturer_sku="SRPD53K1", supplied_price=1_000_000)
     r = review(C, f)
     assert r.ok, r.errors
-    assert r.name == "Seiko SS BLK Bd SIL. G - DOOO"
+    assert r.name == "Seiko SRPD53K1 SS BLK Bd SIL. G - DOOO"
     assert r.sku == "SRPD53K1"
+
+
+def test_watch_name_prints_ref_code_for_ac_not_built_sku():
+    r = review(C, _watch(ref_code="1007", strap_color="Black", case_color="Black"))
+    assert r.name == "AC 1007 SS BLK Bd BLK. G - EMO"
+    assert r.sku == "AC1007SS02C02G"
+
+
+def test_watch_without_sku_gets_no_name_preview():
+    f = ItemFields(brand="Casio", strap_type="Leather", strap_color="Black", case_color="Silver",
+                   gender="G", supplied_price=500_000)
+    r = review(C, f)
+    assert r.name is None
+    assert "manufacturer_sku is missing" in r.errors
 
 
 def test_clock_name_matches_accounting_example():
@@ -183,7 +197,7 @@ def test_caption_overrides_vision():
 def test_brand_without_code_prints_full_name():
     f = ItemFields(brand="Police", strap_type="Leather", strap_color="Brown", case_color="Gold",
                    gender="G", manufacturer_sku="PL15000", selling_price=650_000)
-    assert review(C, f).name == "Police LS BRN Bd GLD. G - BMO"
+    assert review(C, f).name == "Police PL15000 LS BRN Bd GLD. G - BMO"
 
 
 def test_print_code_on_tag():

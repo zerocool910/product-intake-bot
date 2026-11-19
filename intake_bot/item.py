@@ -13,7 +13,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from .catalog import Catalog
-from .naming import NamingError, clock_name, generated_sku, watch_name
+from .naming import NamingError, clock_name, generated_sku, name_sku, watch_name
 from .pricing import price_breakdown
 
 # Exact column order of the accounting importer's template.
@@ -137,8 +137,10 @@ def review(catalog: Catalog, f: ItemFields) -> Review:
             r.sku = f.manufacturer_sku
         if brand and r.hjb and kind == "clock" and case_color and r.sku:
             r.name = clock_name(catalog, brand, r.sku, case_color, r.hjb)
-        elif brand and r.hjb and is_watch and all([strap_type, strap_color, case_color, gender]):
-            r.name = watch_name(catalog, brand, strap_type, strap_color, case_color, gender, r.hjb, dial, index, crown)
+        elif (brand and r.hjb and is_watch and all([strap_type, strap_color, case_color, gender])
+              and (sku := name_sku(brand, f.manufacturer_sku, f.ref_code))):
+            r.name = watch_name(catalog, brand, sku, strap_type, strap_color, case_color, gender, r.hjb,
+                                dial, index, crown)
     except NamingError as e:
         r.errors.append(str(e))
 

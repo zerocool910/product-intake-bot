@@ -70,6 +70,11 @@ Also settled from the accounting session:
   letters.
 - `type` (watch/clock) is an explicit column. A caption with `JD` or
   `clock` sets it to clock (e.g. `Seiko JD 250k sku QXA756W`).
+- Watch names are `{Brand} {SKU} {Strap} {Strap Color} Bd {Case}
+  {Descriptor}. {Gender} - {Cipher}` (owner update 2026-11-19, ahead of
+  the accounting app): `{SKU}` is the manufacturer SKU, or the ref code for
+  AC/EXP/CA. Because the name now includes it, a Unique Descriptor is only
+  needed between AC/EXP/CA models sharing a ref code.
 - Clock names are `{Brand} JD {SKU} Bd {Case} - {Cipher}` (accounting
   `4634f6b`): "JD" is fixed text and the clock's own SKU is printed. "Seiko
   JD" is no longer a brand; Seiko clocks are brand Seiko with Seiko pricing.

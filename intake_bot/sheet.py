@@ -48,13 +48,14 @@ class Sheet:
                 if str(r.get("preview_sku", "")).strip().upper() == sku.strip().upper()]
 
     def similar(self, row: dict[str, object]) -> list[dict]:
-        """Rows already in the sheet with the same brand + strap + strap color + case.
+        """Rows already in the sheet that would print the same name: same brand,
+        same SKU / ref code, same strap + strap color + case (+ descriptor).
 
-        Those would print the same name, so one of them needs a Unique
-        Descriptor (dial → index → crown). Only checks this sheet, not the
-        accounting catalog.
+        Since names include the SKU / ref code, this is mostly AC/EXP/CA models
+        sharing a ref code; one of them needs a Unique Descriptor (dial → index
+        → crown). Only checks this sheet, not the accounting catalog.
         """
-        keys = ("type", "brand", "strap_type", "strap_color", "case_color",
+        keys = ("type", "brand", "ref_code", "manufacturer_sku", "strap_type", "strap_color", "case_color",
                 "dial_color", "index_type", "crown_color")
         found = []
         for existing in self.ws.get_all_records(expected_headers=HEADER):

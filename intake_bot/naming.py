@@ -60,11 +60,18 @@ def descriptor_for_sku(dial: Code | None, index: Code | None, crown: Code | None
     return out
 
 
-def watch_name(catalog: Catalog, brand: Brand, strap_type: Code, strap_color: Code, case_color: Code,
-               gender: Code, hjb: float, dial: Code | None = None, index: Code | None = None,
-               crown: Code | None = None) -> str:
+def name_sku(brand: Brand, manufacturer_sku: str | None, ref_code: str | None) -> str | None:
+    """The {SKU} printed in a name: the owner's ref code for AC/EXP/CA (e.g. 1007),
+    otherwise the manufacturer SKU (e.g. SRPD53K1). Not the long built SKU."""
+    return ref_code if brand.uses_generated_sku else manufacturer_sku
+
+
+def watch_name(catalog: Catalog, brand: Brand, sku: str, strap_type: Code, strap_color: Code,
+               case_color: Code, gender: Code, hjb: float, dial: Code | None = None,
+               index: Code | None = None, crown: Code | None = None) -> str:
+    """{Brand} {SKU} {Strap Type} {Strap Color} Bd {Case} {Descriptor}. {Gender} - {Cipher}"""
     descriptor = descriptor_for_name(dial, index, crown)
-    middle = f"{brand.printed} {strap_type.code} {strap_color.code} Bd {case_color.code}"
+    middle = f"{brand.printed} {sku} {strap_type.code} {strap_color.code} Bd {case_color.code}"
     if descriptor:
         middle += f" {descriptor}"
     return f"{middle}. {gender.code} - {encode_cipher(catalog, hjb)}"
