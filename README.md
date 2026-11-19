@@ -66,20 +66,28 @@ Run once in the foreground to check:
 sudo -u intakebot .venv/bin/python -m intake_bot
 ```
 
-Then install it as a service:
+Then install it as a service (starts on boot, restarts if it crashes):
 
 ```bash
-sudo cp deploy/product-intake-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now product-intake-bot
-journalctl -u product-intake-bot -f
+sudo /opt/product-intake-bot/scripts/intakebotctl install
 ```
 
-Update later:
+After that, `intakebotctl` is a normal command:
 
-```bash
-cd /opt/product-intake-bot && sudo -u intakebot git pull && sudo -u intakebot .venv/bin/pip install -r requirements.txt && sudo systemctl restart product-intake-bot
-```
+| Command | What it does |
+|---|---|
+| `intakebotctl status` | Running or not, since when, last few log lines |
+| `intakebotctl start` / `stop` / `restart` | Start, stop, restart the bot |
+| `intakebotctl logs` | Last 100 log lines (`intakebotctl logs 500` for more) |
+| `intakebotctl follow` | Live log, Ctrl+C to quit |
+| `intakebotctl errors` | Only warnings and errors from the last 24 h |
+| `intakebotctl update` | `git pull`, install requirements, run tests, restart; won't restart if tests fail |
+| `intakebotctl uninstall` | Remove the service (keeps code, `.env`, `data/`, logs) |
+
+Logs go to the system journal and, with `LOG_FILE` set in `.env` (the
+default), also to `/var/log/product-intake-bot/bot.log`, rotated at
+midnight with `LOG_KEEP_DAYS` (30) days kept. The bot token is masked in
+all logs. Set `LOG_LEVEL=DEBUG` in `.env` and restart for more detail.
 
 **Back up `data/`.** It holds the item photos and the SQLite file of
 pending/confirmed items.

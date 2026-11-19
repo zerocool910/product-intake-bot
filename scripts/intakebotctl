@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Control script for the product intake bot service.
+#
+#   intakebotctl install          install + enable the systemd service (run once)
+#   intakebotctl start|stop|restart|status
+#   intakebotctl logs [N]         last N log lines (default 100)
+#   intakebotctl follow           live log (Ctrl+C to quit)
+#   intakebotctl errors           warnings and errors from the last 24 hours
+#   intakebotctl update           git pull, install requirements, run tests, restart
+#   intakebotctl uninstall        stop, disable and remove the service
+#
+# Install as a command:  sudo ln -sf /opt/product-intake-bot/scripts/intakebotctl /usr/local/bin/intakebotctl
+
+set -euo pipefail
+
+SERVICE=product-intake-bot
+APP_DIR=/opt/product-intake-bot
+APP_USER=intakebot
+UNIT_SRC="$APP_DIR/deploy/$SERVICE.service"
+UNIT_DST="/etc/systemd/system/$SERVICE.service"
+LOG_FILE=/var/log/$SERVICE/bot.log
+
+need_root() {
+    if [[ $EUID -ne 0 ]]; then
+        exec sudo "$0" "$@"
+    fi
+}
+
+as_app() { sudo -u "$APP_USER" "$@"; }
+
+cmd=${1:-help}
+case "$cmd" in
+    install)
+        need_root "$@"
+        [[ -f "$APP_DIR/.env" ]] || { echo "Missing $APP_DIR/.env — create it from .env.example first."; exit 1; }
+        install -m 644 "$UNIT_SRC" "$UNIT_DST"
+        systemctl daemon-reload
+        systemctl enable --now "$SERVICE"
+        ln -sf "$APP_DIR/scripts/intakebotctl" /usr/local/bin/intakebotctl
+        sleep 3
+        systemctl --no-pager status "$SERVICE" || true
+        echo
+        echo "Installed. It starts on boot and restarts on crash. Try: intakebotctl follow"
+        ;;
+    start|stop|restart)
+        need_root "$@"
+        systemctl "$cmd" "$SERVICE"
+        sleep 2
+        systemctl --no-pager --lines=5 status "$SERVICE" || true
+        ;;
+    status)
+        systemctl --no-pager --lines=15 status "$SERVICE" || true
+        ;;
+    logs)
+        need_root "$@"
+        journalctl -u "$SERVICE" -n "${2:-100}" --no-pager
+        ;;
+    follow)
+        need_root "$@"
+        journalctl -u "$SERVICE" -f
+        ;;
+    errors)
+        need_root "$@"
+        journalctl -u "$SERVICE" -p warning --since "24 hours ago" --no-pager
+        ;;
+    update)
+        need_root "$@"
+        cd "$APP_DIR"
+        as_app git pull --ff-only
+        as_app .venv/bin/pip install -q -r requirements.txt
+        as_app .venv/bin/python -m pytest -q || { echo "Tests failed — NOT restarting. The running bot is unchanged."; exit 1; }
+        # Pick up unit file changes too.
+        if ! cmp -s "$UNIT_SRC" "$UNIT_DST"; then
+            install -m 644 "$UNIT_SRC" "$UNIT_DST"
+            systemctl daemon-reload
+            echo "Service file updated."
+        fi
+        systemctl restart "$SERVICE"
+        sleep 3
+        systemctl --no-pager --lines=5 status "$SERVICE" || true
+        ;;
+    uninstall)
+        need_root "$@"
+        systemctl disable --now "$SERVICE" || true
+        rm -f "$UNIT_DST" /usr/local/bin/intakebotctl
+        systemctl daemon-reload
+        echo "Service removed. Code, .env, data/ and logs were left in place."
+        ;;
+    *)
+        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+        [[ -f "$LOG_FILE" ]] && echo "Log file: $LOG_FILE"
+        ;;
+esac
