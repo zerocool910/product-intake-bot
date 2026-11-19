@@ -221,3 +221,44 @@ def test_caption_smartwatch_lines():
 def test_sale_brand_number_becomes_selling_price():
     f = apply_sale_price(C, parse_caption(C, "Police 650.000"))
     assert (f.selling_price, f.supplied_price) == (650_000, None)
+
+
+# ---------- caption: strap / colors / qty (works without Claude) ----------
+
+def test_caption_strap_and_colors_in_tag_order():
+    f = parse_caption(C, "Seiko sku SRPD53K1 G ss silver bd silver 1pcs")
+    assert (f.brand, f.manufacturer_sku, f.gender, f.quantity) == ("Seiko", "SRPD53K1", "Gents", 1)
+    assert (f.strap_type, f.strap_color, f.case_color) == ("Stainless St.", "Silver", "Silver")
+
+
+def test_caption_full_names_multiword_colors_and_codes():
+    f = parse_caption(C, "AC 950k ref 1007 L leather black bd rose gold qty 2")
+    assert (f.strap_type, f.strap_color, f.case_color, f.quantity) == ("Leather", "Black", "Rose Gold", 2)
+    f = parse_caption(C, "Casio 500k sku MTP1302D G/L RB BLK BD SIL")
+    assert (f.strap_type, f.strap_color, f.case_color, f.gender) == ("Rubber", "Black", "Silver", "Gents/Ladies")
+    f = parse_caption(C, "Alba 1.480.000 sku AS9K51X1 L stainless st. mica navy blue bd silver stone")
+    assert (f.strap_type, f.strap_color, f.case_color) == ("Stainless St. Mica", "Navy Blue", "Silver Stone")
+
+
+def test_caption_clock_case_color_only():
+    f = parse_caption(C, "Seiko JD 250k sku QXA756W bd white")
+    assert (f.type, f.case_color, f.strap_type) == ("clock", "White", None)
+
+
+def test_caption_quantity_forms():
+    for text, q in [("1pcs", 1), ("2 pcs", 2), ("pcs 3", 3), ("qty 4", 4), ("x5", 5), ("6 buah", 6)]:
+        assert parse_caption(C, f"Seiko 1.000.000 {text}").quantity == q, text
+        assert parse_caption(C, f"Seiko 1.000.000 {text}").supplied_price == 1_000_000, text
+
+
+def test_caption_attributes_need_the_bd_marker():
+    # "silver" alone (e.g. in a note) isn't guessed into a field.
+    f = parse_caption(C, "Seiko 1.000.000 silver")
+    assert (f.strap_type, f.strap_color, f.case_color) == (None, None, None)
+
+
+def test_full_caption_is_enough_without_claude():
+    f = parse_caption(C, "Seiko 1.250.000 sku SRPD53K1 G ss silver bd silver 1pcs")
+    r = review(C, f)
+    assert r.ok, r.errors
+    assert r.name == "Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO"

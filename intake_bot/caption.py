@@ -1,7 +1,12 @@
 """Deterministic parsing of the photo caption.
 
-Staff type something like:  "Seiko 1.250.000 G qty 2"  or  "AC 950k ref AE1200 L"
-Anything found here overrides what the vision model proposed.
+Staff type something like:
+    "Seiko 1.250.000 sku SRPD53K1 G ss silver bd silver 1pcs"
+    "AC 950k ref 1007 L leather black bd rose gold qty 2"
+    "Seiko JD 250k sku QXA756W bd white"            (clock)
+Strap/colors follow the tag-name order: {strap type} {strap color} bd {case color}.
+Anything found here overrides what the vision model proposed, so a caption
+alone is enough when the photo can't be read.
 """
 
 from __future__ import annotations
@@ -15,7 +20,12 @@ _PRICE = re.compile(
     r"(?<![\w.,])(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(jt|juta|k|rb|ribu)?(?![\w.,])",
     re.IGNORECASE,
 )
-_QTY = re.compile(r"\b(?:qty|jumlah|pcs)\s*[:=]?\s*(\d+)\b|\bx\s?(\d+)\b", re.IGNORECASE)
+_QTY = re.compile(
+    r"\b(?:qty|jumlah|pcs|pc)\s*[:=]?\s*(\d+)\b"          # qty 2, pcs 2
+    r"|(?<![\w.,])(\d+)\s*(?:pcs|pc|pieces|units?|buah)\b"  # 1pcs, 2 pcs, 3 buah (not the "000" of 1.000.000)
+    r"|\bx\s?(\d+)\b",                                    # x2
+    re.IGNORECASE)
+_BD = r"(?:bd|bodi|body|case)"
 _REF = re.compile(r"\bref\s*[:=]?\s*([A-Za-z0-9]+)\b", re.IGNORECASE)
 _SKU = re.compile(r"\bsku\s*[:=]?\s*([A-Za-z0-9-]+)\b", re.IGNORECASE)
 _CLOCK = re.compile(r"\b(jd|clock|jam dinding|dinding|wall clock)\b", re.IGNORECASE)
@@ -47,6 +57,35 @@ def parse_price(text: str) -> float | None:
     return best
 
 
+def _alternation(table) -> str:
+    """Regex alternation of a lookup table's names and codes, longest first so
+    "rose gold" wins over "gold" and "stainless st. mica" over "stainless st."."""
+    keys = {k.lower() for item in table.items for k in (item.name, item.code) if k}
+    return "|".join(re.escape(k) for k in sorted(keys, key=len, reverse=True))
+
+
+def parse_attributes(catalog: Catalog, text: str) -> tuple[dict, str]:
+    """Strap type, strap color and case color, in tag-name order:
+    "ss silver bd silver", "leather black bd rose gold", or just "bd white"
+    (clocks). Names or codes, any case. Returns (fields, text with the match
+    removed)."""
+    strap, color = _alternation(catalog.strap_types), _alternation(catalog.colors)
+    b = r"(?<![\w.])"   # word start
+    e = r"(?![\w])"     # word end ("st." already ends in a dot)
+    full = re.compile(rf"{b}({strap}){e}\s+({color}){e}\s+{_BD}\s+({color}){e}", re.IGNORECASE)
+    case_only = re.compile(rf"{b}{_BD}\s+({color}){e}", re.IGNORECASE)
+    out: dict = {}
+    if m := full.search(text):
+        out["strap_type"] = catalog.strap_types.get(m.group(1)).name
+        out["strap_color"] = catalog.colors.get(m.group(2)).name
+        out["case_color"] = catalog.colors.get(m.group(3)).name
+    elif m := case_only.search(text):
+        out["case_color"] = catalog.colors.get(m.group(1)).name
+    if m:
+        text = text[:m.start()] + " " + text[m.end():]
+    return out, text
+
+
 def parse_caption(catalog: Catalog, text: str | None) -> ItemFields:
     if not text:
         return ItemFields()
@@ -61,8 +100,11 @@ def parse_caption(catalog: Catalog, text: str | None) -> ItemFields:
         out["manufacturer_sku"] = m.group(1).upper()
         rest = rest.replace(m.group(0), " ")
     if m := _QTY.search(rest):
-        out["quantity"] = int(m.group(1) or m.group(2))
+        out["quantity"] = int(m.group(1) or m.group(2) or m.group(3))
         rest = rest.replace(m.group(0), " ")
+
+    attrs, rest = parse_attributes(catalog, rest)
+    out.update(attrs)
 
     if (price := parse_price(rest)) is not None:
         out["supplied_price"] = price

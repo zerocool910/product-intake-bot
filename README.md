@@ -16,12 +16,17 @@ Google Sheet in exactly the column shape the accounting app's
 Send one photo, or an album with the item, tag and box, with a caption like:
 
 ```
-Seiko 1.250.000 G
-AC 950k ref AE1200 L qty 2
+Seiko 1.250.000 sku SRPD53K1 G ss silver bd silver 1pcs
+AC 950k ref 1007 L leather black bd rose gold qty 2
 Bonia 400rb Ladies sku BNB10123
 Seiko JD 250k sku QXA756W        (JD or "clock" = a clock)
 ```
 
+- **Strap and colors** can be typed in tag order, `{strap} {strap color} bd
+  {case color}` (names or codes: `ss silver bd silver`, `LS BLK BD RSG`).
+  Typed values override what Claude reads from the photo, so a full
+  caption works even if the photo can't be read. Quantity: `1pcs`,
+  `2 pcs`, `qty 2`, `x2`.
 - **List brands** (AC, EXP, CA, Seiko, Alba, Casio, Guess, Aigner): type
   the distributor's **list price**.
 - **Nett brands** (Bonia, Timberland, Sezen, …): type the **cost**.

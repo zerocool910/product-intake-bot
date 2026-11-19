@@ -31,8 +31,9 @@ ALBUM_WAIT_SECONDS = 2.0
 
 HELP = (
     "Send a photo of one item (add the tag/box as extra photos in the same album).\n"
-    "Caption: brand, the price number, gender — e.g. <code>Seiko 1.250.000 G</code> "
-    "or <code>AC 950k ref AE1200 L qty 2</code>.\n"
+    "Caption: brand, the price number, gender, SKU, and optionally strap/colors in tag order — e.g.\n"
+    "<code>Seiko 1.250.000 sku SRPD53K1 G ss silver bd silver 1pcs</code>\n"
+    "<code>AC 950k ref 1007 L leather black bd rose gold qty 2</code>\n"
     "• List brands (AC, EXP, Seiko, Casio…): type the distributor <b>list price</b>.\n"
     "• Nett brands (Bonia, Timberland…): type the <b>cost</b>.\n"
     "• SALE brands: type the selling price.\n"
