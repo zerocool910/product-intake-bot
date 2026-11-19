@@ -46,7 +46,7 @@ LEGEND: dict[str, tuple[str, str, str, bool]] = {
     "supplied_price": ("Caption", "List & Nett brands", "List brands: distributor list price (HLB). Nett brands: cost (HBB).", True),
     "selling_price": ("Caption", "SALE brands", "Selling price, typed by hand (no formula).", True),
     "cost_price": ("Bot (HBB)", "No", "HBB calculated from supplied_price. Accounting recalculates it for List/Nett brands; for SALE brands it is the optional typed cost.", True),
-    "quantity": ("Caption (1pcs, qty 2) / default 1", "No", "Units in hand. Importing records a Purchase (stock + cost) in accounting.", True),
+    "quantity": ("Caption (1pcs, qty 2) / default 1", "No", "Units received. Each row is one goods receipt; the purchase invoice is made from receipts in accounting.", True),
     "category": ("Staff", "No", "Optional Product Category from accounting (Products → Manage Categories), e.g. Diver Watches.", True),
     "intake_id": ("Bot", "", "Bot's id for this item (date-random).", False),
     "logged_by": ("Bot", "", "Telegram name and id of whoever sent it.", False),
@@ -56,7 +56,7 @@ LEGEND: dict[str, tuple[str, str, str, bool]] = {
     "preview_sku": ("Bot", "", "SKU (Kode Barang) the accounting app will use.", False),
     "photo_dial_color": ("Claude", "", "Dial color seen in the photo. Info only; used for the automatic descriptor.", False),
     "photo_index_type": ("Claude", "", "Index style seen in the photo. Info only; used for the automatic descriptor.", False),
-    "notes": ("Claude / bot", "", "Free notes, tag cipher seen, [replaces …].", False),
+    "notes": ("Claude / bot", "", "Free notes, e.g. tag cipher seen.", False),
 }
 
 
@@ -236,7 +236,7 @@ def auto_descriptor(catalog: Catalog, f: ItemFields, clashes: list[dict]) -> tup
     descriptor text) or None if it can't help.
 
     Only for AC/EXP/CA: other brands print their manufacturer SKU, so a name
-    clash there means the same SKU, which is the replace-the-row case. If a
+    clash there means the same SKU, i.e. the same product received again. If a
     clashing row has the same dial AND index, it's probably the same model
     photographed again, so no descriptor either (staff decide)."""
     brand = catalog.brands.get(f.brand)

@@ -1,4 +1,4 @@
-"""Sheet.save: same SKU overwrites the existing row, new SKU appends."""
+"""Sheet.save: every confirmation is its own receipt line, even for a repeat SKU."""
 
 from intake_bot.sheet import HEADER, Sheet
 
@@ -13,10 +13,6 @@ class FakeWorksheet:
     def append_row(self, values, value_input_option=None):
         self.rows.append(list(values))
 
-    def update(self, values, range_name, value_input_option=None):
-        n = int(range_name.lstrip("A"))
-        self.rows[n - 1] = list(values[0])
-
 
 def make(rows):
     s = object.__new__(Sheet)
@@ -24,26 +20,13 @@ def make(rows):
     return s
 
 
-def test_new_sku_is_appended():
-    s = make([{"intake_id": "a", "preview_sku": "SRPD53K1"}])
-    assert s.save({"intake_id": "b", "preview_sku": "SNK809K1"}) == []
-    assert [r["intake_id"] for r in s.ws.get_all_records()] == ["a", "b"]
-
-
-def test_same_sku_overwrites_in_place():
-    s = make([{"intake_id": "a", "preview_sku": "X1"},
-              {"intake_id": "old", "preview_sku": "SRPD53K1", "supplied_price": 1_250_000},
-              {"intake_id": "c", "preview_sku": "X2"}])
-    replaced = s.save({"intake_id": "new", "preview_sku": "srpd53k1", "supplied_price": 5_000_000})
-    assert replaced == ["old"]
+def test_repeat_sku_is_a_new_receipt_line():
+    s = make([{"intake_id": "first", "preview_sku": "SRPD53K1", "quantity": 1}])
+    s.save({"intake_id": "second", "preview_sku": "SRPD53K1", "quantity": 2})
     recs = s.ws.get_all_records()
-    assert [r["intake_id"] for r in recs] == ["a", "new", "c"]
-    assert recs[1]["supplied_price"] == 5_000_000
+    assert [(r["intake_id"], r["quantity"]) for r in recs] == [("first", 1), ("second", 2)]
 
 
-def test_extra_copies_are_cleared():
-    s = make([{"intake_id": "a", "preview_sku": "DUP"}, {"intake_id": "b", "preview_sku": "DUP"}])
-    assert s.save({"intake_id": "new", "preview_sku": "DUP"}) == ["a", "b"]
-    recs = s.ws.get_all_records()
-    assert recs[0]["intake_id"] == "new"
-    assert all(v == "" for v in recs[1].values())
+def test_same_sku_lists_earlier_receipts_with_row_numbers():
+    s = make([{"intake_id": "a", "preview_sku": "X1"}, {"intake_id": "b", "preview_sku": "srpd53k1"}])
+    assert [(r["intake_id"], r["_row"]) for r in s.same_sku("SRPD53K1")] == [("b", 3)]

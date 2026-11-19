@@ -169,24 +169,14 @@ class IntakeBot:
             "photo_dial_color": intake.fields.photo_dial_color or "",
             "photo_index_type": intake.fields.photo_index_type or "",
         })
-        # Same SKU already in the sheet -> this row replaces it (owner's rule:
-        # Confirm overwrites, Cancel leaves the sheet alone).
-        existing = await asyncio.to_thread(self.sheet.same_sku, r.sku or "")
-        if existing:
-            old_ids = ", ".join(str(m.get("intake_id", "?")) for m in existing)
-            row["notes"] = f"{notes} [replaces {old_ids}]".strip()
-        replaced = await asyncio.to_thread(self.sheet.save, row)
+        # Goods receiving: every confirmation is its own receipt line, even for
+        # a SKU received before.
+        await asyncio.to_thread(self.sheet.save, row)
         self.store.update(intake.id, status="confirmed")
-        for old in replaced:
-            if old and old != intake.id and self.store.get(old):
-                self.store.update(old, status="replaced")
         await query.answer("Saved.")
         await query.edit_message_reply_markup(None)
-        if replaced:
-            await query.message.reply_text(
-                f"♻️ {intake.id} replaced {', '.join(replaced)} in the sheet (same SKU {r.sku}).\n{r.name or ''}")
-        else:
-            await query.message.reply_text(f"✅ {intake.id} added to the sheet.\n{r.name or ''}")
+        qty = row.get("quantity") or ""
+        await query.message.reply_text(f"✅ {intake.id} received ({qty} pcs) and added to the sheet.\n{r.name or ''}")
 
     # ---------- summary ----------
 
@@ -261,8 +251,9 @@ class IntakeBot:
                 same_sku, dupes = [], []
             if same_sku:
                 ids = ", ".join(str(x.get("intake_id", "?")) for x in same_sku)
-                lines.append(f"♻️ SKU {e(r.sku)} is already in the sheet ({e(ids)}). "
-                             "<b>✅ Confirm replaces that row</b> with this one; ❌ Cancel leaves the sheet as it is.")
+                lines.append(f"🔁 SKU {e(r.sku)} was received before ({e(ids)}). "
+                             "✅ Confirm adds <b>another receipt line</b>; it doesn't change the earlier one. "
+                             "If this is the same delivery logged twice, press ❌ Cancel.")
             elif dupes:
                 lines.append(f"⚠️ {len(dupes)} item(s) in the sheet would print the same name. "
                              "If this is a different model, add a descriptor (e.g. \"dial blue\").")
@@ -277,8 +268,7 @@ class IntakeBot:
 
         buttons = [[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{intake.id}")]]
         if r.ok:
-            label = "✅ Confirm (replace)" if same_sku else "✅ Confirm"
-            buttons[0].insert(0, InlineKeyboardButton(label, callback_data=f"confirm:{intake.id}"))
+            buttons[0].insert(0, InlineKeyboardButton("✅ Confirm", callback_data=f"confirm:{intake.id}"))
         sent = await reply_to.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
                                          reply_markup=InlineKeyboardMarkup(buttons))
         if intake.message_id:

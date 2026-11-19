@@ -119,13 +119,15 @@ Also settled from the accounting session:
    There is no rounding rule, and the cipher just truncates.
 6. **Photo backup / off-box storage.** Photos live on the VPS disk under
    `data/`. Back that folder up, or add cloud storage later.
-7. **Restocks.** Since `dc919ae` the importer rejects a SKU that already
-   exists in accounting or repeats within the file. When a SKU is already
-   in the staging sheet, the bot says so and **✅ Confirm replaces that row**
-   (notes record `[replaces <old intake_id>]`); ❌ Cancel leaves the sheet
-   as it is (owner rule, 2026-11-19). The bot can't see the accounting
-   catalog, and replacing a sheet row doesn't change a product that was
-   already imported. More stock of an item that's already in accounting is a stock
-   receipt there, not a new import row.
+7. **The bot is goods receiving** (owner decision 2026-11-19). Stock comes
+   from two sources: receipts (this bot) and purchase invoices, and the
+   purchase invoice is made *from* receipts, so stock isn't counted twice.
+   Each ✅ Confirm is its own receipt row, even for a SKU received before
+   (the bot says "received before … adds another receipt line"). Supplier
+   and delivery-note number are not collected by the bot; whoever makes the
+   purchase invoice in accounting picks the receipts it covers.
+   **Accounting side, not done yet:** a Receiving record, "purchase invoice
+   from receipts", and the importer accepting an existing SKU as a new
+   receipt (today it rejects SKUs that already exist or repeat in a file).
 8. **Direct sheet → importer path** (skipping the `.xlsx` export), if `#1`
    ever reads Google Sheets.

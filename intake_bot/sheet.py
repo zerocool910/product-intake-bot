@@ -85,9 +85,8 @@ class Sheet:
         self.ws.append_row([row.get(c, "") for c in HEADER], value_input_option="RAW")
 
     def same_sku(self, sku: str) -> list[dict]:
-        """Rows already in the sheet with this SKU, each with its sheet row
-        number in "_row". The importer rejects a SKU that repeats within one
-        file, so a new item with the same SKU replaces the old row instead."""
+        """Rows already in the sheet with this SKU (earlier receipts), each with
+        its sheet row number in "_row"."""
         if not sku:
             return []
         want = sku.strip().upper()
@@ -95,22 +94,11 @@ class Sheet:
                 for i, r in enumerate(self.ws.get_all_records(expected_headers=HEADER))
                 if str(r.get("preview_sku", "")).strip().upper() == want]
 
-    def save(self, row: dict[str, object]) -> list[str]:
-        """Write a confirmed row. If its SKU is already in the sheet, overwrite
-        that row (and clear any further copies) instead of adding a duplicate.
-        Looks the SKU up again at write time, so it overwrites the right row
-        even if the sheet changed since the summary was shown.
-        Returns the intake_ids that were replaced ([] if the row was added)."""
-        values = [row.get(c, "") for c in HEADER]
-        matches = self.same_sku(str(row.get("preview_sku", "")))
-        if not matches:
-            self.ws.append_row(values, value_input_option="RAW")
-            return []
-        first, *extra = matches
-        self.ws.update(values=[values], range_name=f"A{first['_row']}", value_input_option="RAW")
-        for m in extra:  # shouldn't happen, but never leave a second copy behind
-            self.ws.update(values=[[""] * len(HEADER)], range_name=f"A{m['_row']}", value_input_option="RAW")
-        return [str(m.get("intake_id", "")) for m in matches]
+    def save(self, row: dict[str, object]) -> None:
+        """Append a confirmed row. Every confirmation is its own receipt line,
+        even when the SKU was received before (owner decision 2026-11-19: the
+        bot is goods receiving, so two deliveries are two rows)."""
+        self.ws.append_row([row.get(c, "") for c in HEADER], value_input_option="RAW")
 
     def similar(self, row: dict[str, object]) -> list[dict]:
         """Rows already in the sheet that would print the same name: same brand,

@@ -49,7 +49,9 @@ How the bot fills the import columns (owner decisions, 2026-11-19):
   (accounting recalculates the same value and ignores the column for them);
   the typed cost, if any, for SALE brands.
 - `quantity`: what staff type (`1pcs`, `qty 2`, `x2`), otherwise **1**.
-  Importing a quantity records a Purchase (stock + cost) in accounting.
+  Each row is a **goods receipt**. The purchase invoice is made from
+  receipts in accounting, so stock isn't counted twice. The same SKU can
+  appear on several rows (one per delivery).
 - `dial_color` / `index_type`: left empty unless the item would print the
   same name as a row already in the sheet. For AC/EXP/CA the bot then fills
   them from what Claude saw (dial first, index only if the dial matches
