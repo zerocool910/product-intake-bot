@@ -11,7 +11,10 @@ import html
 import logging
 from datetime import datetime, timezone
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from zoneinfo import ZoneInfo
+
+from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup,
+                      ReplyKeyboardRemove, Update)
 from telegram.constants import ParseMode
 from telegram.error import TimedOut
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes,
@@ -23,6 +26,7 @@ from .config import Settings
 from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_rows, to_import_row
 from .master import MasterUnavailable, ProductMaster, base_reference, match, parse_descriptor
 from .naming import decode_cipher
+from .session import END_LABEL, greeting, summary as session_summary
 from .sheet import Sheet
 from .store import Intake, Store
 from .vision import Vision, VisionError
@@ -52,6 +56,91 @@ class IntakeBot:
         self.photo_dir = settings.data_dir / "photos"
         self.photo_dir.mkdir(parents=True, exist_ok=True)
         self._albums: dict[str, list[Message]] = {}
+        self._waiting: dict[tuple[int, int], list[Message]] = {}  # photos sent with no session open
+        self.tz = ZoneInfo(getattr(settings, "timezone", "Asia/Jakarta"))
+
+    # ---------- menu and intake sessions ----------
+
+    MENU = InlineKeyboardMarkup([[InlineKeyboardButton("📦 1. Intake", callback_data="menu:intake"),
+                                  InlineKeyboardButton("🧰 2. Other tasks", callback_data="menu:other")]])
+    SESSION_KEYS = ReplyKeyboardMarkup([[END_LABEL]], resize_keyboard=True, is_persistent=True)
+
+    async def _show_menu(self, message: Message, first_name: str | None) -> None:
+        await message.reply_text(greeting(first_name), parse_mode=ParseMode.HTML, reply_markup=self.MENU)
+
+    async def _start_intake(self, message: Message, user) -> None:
+        session = self.store.start_session(message.chat_id, user.id, user.full_name)
+        started = datetime.fromisoformat(session.started_at).astimezone(self.tz)
+        await message.reply_text(
+            f"📦 <b>Intake session started</b> ({started:%H:%M}).\n\n{HELP}\n\n"
+            f"When you're done, tap <b>{END_LABEL}</b> below (or send /end).",
+            parse_mode=ParseMode.HTML, reply_markup=self.SESSION_KEYS)
+        waiting = self._waiting.pop((message.chat_id, user.id), None)
+        if waiting:
+            await self._process(waiting, session.id)
+
+    async def _end_requested(self, message: Message, user) -> None:
+        session = self.store.active_session(message.chat_id, user.id)
+        if not session:
+            await message.reply_text("No intake session is open.", reply_markup=ReplyKeyboardRemove())
+            await self._show_menu(message, user.first_name)
+            return
+        pending = [i for i in self.store.session_items(session.id) if i.status == "pending"]
+        if pending:
+            listing = "\n".join(f"• <code>{html.escape(i.id)}</code> {html.escape(i.fields.brand or '?')} "
+                                 f"{html.escape(i.fields.manufacturer_sku or i.fields.ref_code or '')}"
+                                 for i in pending)
+            await message.reply_text(
+                f"⏳ <b>{len(pending)} item(s) not confirmed yet</b> — they are NOT in the sheet:\n{listing}\n\n"
+                "Confirm or cancel them first, or discard them and end.",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📋 Show them", callback_data=f"end:review:{session.id}")],
+                    [InlineKeyboardButton("🗑 Discard them & end", callback_data=f"end:discard:{session.id}")],
+                    [InlineKeyboardButton("↩️ Keep receiving", callback_data=f"end:keep:{session.id}")]]))
+            return
+        await self._finish_session(message, session.id, user.first_name)
+
+    async def _finish_session(self, message: Message, session_id: int, first_name: str | None) -> None:
+        session = self.store.end_session(session_id)
+        text = session_summary(session, self.store.session_items(session_id), self.tz, self.sheet.tab_title())
+        await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=ReplyKeyboardRemove())
+        await self._show_menu(message, first_name)
+
+    async def _menu_or_end_button(self, query, user) -> None:
+        kind, _, rest = query.data.partition(":")
+        message = query.message
+        if kind == "menu":
+            await query.answer()
+            if rest in ("intake", "intake_use"):
+                await query.edit_message_reply_markup(None)
+                await self._start_intake(message, user)
+            elif rest == "other":
+                await message.reply_text(
+                    "🧰 Other tasks aren't set up yet — for now I can only do 📦 Intake. "
+                    "Tell the owner what else you'd like me to do.", reply_markup=self.MENU)
+            elif rest == "dismiss":
+                self._waiting.pop((message.chat_id, user.id), None)
+                await query.edit_message_text("OK, photo not used.")
+            return
+        action, _, sid = rest.partition(":")
+        session = self.store.session(int(sid)) if sid.isdigit() else None
+        if not session or session.ended_at or session.user_id != user.id:
+            await query.answer("This session is already closed.")
+            return
+        pending = [i for i in self.store.session_items(session.id) if i.status == "pending"]
+        await query.answer()
+        await query.edit_message_reply_markup(None)
+        if action == "review":
+            for i in pending:
+                await self._send_summary(message, i)
+            await message.reply_text(f"Confirm or cancel each one, then tap {END_LABEL} again.",
+                                     reply_markup=self.SESSION_KEYS)
+        elif action == "discard":
+            for i in pending:
+                self.store.update(i.id, status="cancelled")
+            await self._finish_session(message, session.id, user.first_name)
+        else:
+            await message.reply_text("OK, keep sending photos.", reply_markup=self.SESSION_KEYS)
 
     # ---------- access ----------
 
@@ -68,8 +157,19 @@ class IntakeBot:
     # ---------- handlers ----------
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._allowed(update):
+            return
+        msg, user = update.effective_message, update.effective_user
+        if self.store.active_session(msg.chat_id, user.id):
+            await msg.reply_text(f"📦 Your intake session is still open.\n\n{HELP}\n\n"
+                                 f"Tap <b>{END_LABEL}</b> when you're done.",
+                                 parse_mode=ParseMode.HTML, reply_markup=self.SESSION_KEYS)
+        else:
+            await self._show_menu(msg, user.first_name)
+
+    async def end_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed(update):
-            await update.effective_message.reply_text(HELP, parse_mode=ParseMode.HTML)
+            await self._end_requested(update.effective_message, update.effective_user)
 
     async def photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._allowed(update):
@@ -83,14 +183,27 @@ class IntakeBot:
                 context.job_queue.run_once(self._album_ready, ALBUM_WAIT_SECONDS,
                                            data=msg.media_group_id, name=f"album-{msg.media_group_id}")
             return
-        await self._process([msg])
+        await self._photos_in(([msg]))
 
     async def _album_ready(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         messages = self._albums.pop(context.job.data, [])
         if messages:
-            await self._process(messages)
+            await self._photos_in(messages)
 
-    async def _process(self, messages: list[Message]) -> None:
+    async def _photos_in(self, messages: list[Message]) -> None:
+        first = messages[0]
+        session = self.store.active_session(first.chat_id, first.from_user.id)
+        if session:
+            await self._process(messages, session.id)
+            return
+        self._waiting[(first.chat_id, first.from_user.id)] = messages
+        await first.reply_text(
+            "No intake session is open. Start one and use this photo?",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📦 Start intake & use it", callback_data="menu:intake_use"),
+                InlineKeyboardButton("Not now", callback_data="menu:dismiss")]]))
+
+    async def _process(self, messages: list[Message], session_id: int | None = None) -> None:
         first = messages[0]
         user = first.from_user
         caption = next((m.caption for m in messages if m.caption), None)
@@ -113,20 +226,36 @@ class IntakeBot:
             proposed = ItemFields(notes=f"Photo not read: {e}")
 
         fields = apply_sale_price(self.catalog, proposed.merged(parse_caption(self.catalog, caption)))
-        intake = self.store.create(intake_id, first.chat_id, user.id, user.full_name, fields, paths)
+        intake = self.store.create(intake_id, first.chat_id, user.id, user.full_name, fields, paths, session_id)
         await status.delete()
         await self._send_summary(first, intake)
 
     async def text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._allowed(update):
             return
-        msg = update.effective_message
+        msg, user = update.effective_message, update.effective_user
+        typed = (msg.text or "").strip()
+        if typed == END_LABEL or typed.lower() in ("/end", "end intake", "selesai"):
+            await self._end_requested(msg, user)
+            return
+        session = self.store.active_session(msg.chat_id, user.id)
+        if not session and typed.lower() in ("1", "intake", "1. intake"):
+            await self._start_intake(msg, user)
+            return
+        if not session and typed.lower() in ("2", "other", "other tasks"):
+            await msg.reply_text("🧰 Other tasks aren't set up yet — for now I can only do 📦 Intake.",
+                                 reply_markup=self.MENU)
+            return
         intake = None
         if msg.reply_to_message:
             intake = self.store.by_message(msg.chat_id, msg.reply_to_message.message_id)
         intake = intake or self.store.latest_pending(msg.chat_id, msg.from_user.id)
         if not intake or intake.status != "pending":
-            await msg.reply_text("Nothing pending to correct. Send a photo to start a new item.")
+            if session:
+                await msg.reply_text(f"Nothing pending to correct. Send the next photo, or tap {END_LABEL}.",
+                                     reply_markup=self.SESSION_KEYS)
+            else:
+                await self._show_menu(msg, user.first_name)
             return
         try:
             corrected = await asyncio.to_thread(self.vision.correct, intake.fields, msg.text)
@@ -141,6 +270,9 @@ class IntakeBot:
         query = update.callback_query
         if not await self._allowed(update):
             await query.answer()
+            return
+        if query.data.startswith(("menu:", "end:")):
+            await self._menu_or_end_button(query, update.effective_user)
             return
         action, intake_id = query.data.split(":", 1)
         picked = None
@@ -192,17 +324,26 @@ class IntakeBot:
                 row["notes"] = f"{row['notes']} [replaces {existing.get('intake_id', '?')}]".strip()
                 await asyncio.to_thread(self.sheet.replace, existing["_row"], row)
                 text = f"🔁 {intake.id} replaced today's {existing.get('intake_id', '?')} for {r.sku} ({qty} pcs)."
+                saved_action, status = "replaced", "confirmed"
+                # The replaced item no longer counts in its own session's summary.
+                old = self.store.get(str(existing.get("intake_id", "")))
+                if old and old.id != intake.id and old.saved_action:
+                    self.store.record_saved(old.id, status="replaced", action="", qty=0, name=old.saved_name or "",
+                                            sku=old.saved_sku or "", hbb=old.saved_hbb, hjb=old.saved_hjb)
             else:
                 new_qty = await asyncio.to_thread(self.sheet.add_quantity, existing, qty, f"+{qty} ({intake.id})")
                 text = f"➕ Added {qty} to today's {existing.get('intake_id', '?')} for {r.sku}: now {new_qty} pcs."
-            self.store.update(intake.id, status="merged" if action == "addqty" else "confirmed")
+                saved_action, status = "merged", "merged"
+            self.store.record_saved(intake.id, status=status, action=saved_action, qty=qty, name=r.name or "",
+                                    sku=r.sku or "", hbb=r.hbb, hjb=r.hjb)
         elif action == "confirm" and today_rows:
             await query.answer("Already received today: choose Replace or Add qty.", show_alert=True)
             return
         else:
             # New receipt line (a different date counts as a new receipt).
             await asyncio.to_thread(self.sheet.append, row)
-            self.store.update(intake.id, status="confirmed")
+            self.store.record_saved(intake.id, status="confirmed", action="added", qty=qty, name=r.name or "",
+                                    sku=r.sku or "", hbb=r.hbb, hjb=r.hjb)
             text = f"✅ {intake.id} received ({qty} pcs) on {row['receipt_date']}, added to {self.sheet.tab_title()}."
         await query.answer("Saved.")
         await query.edit_message_reply_markup(None)
@@ -247,6 +388,8 @@ class IntakeBot:
                     if m.fields != f:
                         self.store.update(intake.id, fields=m.fields)
                         intake = self.store.get(intake.id)
+                    if m.kind in ("new", "restock"):
+                        self.store.set_outcome(intake.id, m.kind)
                     if m.kind == "choose":
                         return intake, ("❔ <b>Which product is this?</b> Several existing AC/EXP/CA variants "
                                         "share this ref and strap/colors. Pick one below, or reply with its "
@@ -256,6 +399,7 @@ class IntakeBot:
                 if sku:
                     products = await asyncio.to_thread(self.master.by_prefix, sku)
                     hit = next((p for p in products if p.sku.upper() == sku.upper()), None)
+                    self.store.set_outcome(intake.id, "restock" if hit else "new")
                     if hit:
                         qty = f", stock {hit.stock_quantity:g}" if isinstance(hit.stock_quantity, (int, float)) else ""
                         return intake, f"📦 Restock of existing <code>{html.escape(hit.sku)}</code>{qty}.", []
@@ -424,7 +568,8 @@ def build_application(settings: Settings) -> Application:
            .connect_timeout(15).read_timeout(30).write_timeout(30).pool_timeout(15)
            .get_updates_connect_timeout(15).get_updates_read_timeout(30)
            .build())
-    app.add_handler(CommandHandler(["start", "help"], bot.start))
+    app.add_handler(CommandHandler(["start", "help", "menu"], bot.start))
+    app.add_handler(CommandHandler(["end", "selesai"], bot.end_command))
     app.add_handler(MessageHandler(filters.PHOTO, bot.photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))

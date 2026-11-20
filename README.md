@@ -13,6 +13,18 @@ Google Sheet in exactly the column shape the accounting app's
 
 ## Using it (staff)
 
+1. Send `/start` (or any message). The bot says hi and asks what to do:
+   **📦 1. Intake** or **🧰 2. Other tasks** (tap, or type 1 / 2).
+2. **Intake** opens a receiving session. Send one photo per item as below.
+   A photo sent with no session open asks "Start intake & use it?".
+3. Tap **⏹ End intake** (kept at the bottom of the chat) or send `/end`.
+   If items are still unconfirmed, the bot lists them first: show them,
+   discard them and end, or keep receiving.
+4. You get an **intake summary**: items, pieces, new vs restock, value at
+   cost (HBB) and list (HJB), cancelled, and which sheet tab to import.
+
+### Each item
+
 Send one photo, or an album with the item, tag and box, with a caption like:
 
 ```
