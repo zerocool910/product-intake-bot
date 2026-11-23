@@ -34,6 +34,17 @@ from .vision import Vision, VisionError
 log = logging.getLogger(__name__)
 ALBUM_WAIT_SECONDS = 2.0
 
+MARKS_HELP = (
+    "<b>What the marks mean</b> (you don't press them):\n"
+    "📦 <b>Restock of existing …</b> — already in accounting; more stock. Tap ✅.\n"
+    "🆕 <b>New product …</b> — not in accounting yet; created on import. Tap ✅.\n"
+    "❓ next to a field — Claude wasn't sure from the photo. Check it; if wrong, reply e.g. <code>case gold</code>.\n"
+    "❔ <b>Which product is this?</b> — tap the right product button (AC/EXP/CA).\n"
+    "⚠️ <b>Product master not reachable</b> — couldn't check accounting this time; you can still confirm.\n\n"
+    "To change something, reply to the summary in plain words. Buttons under the message: "
+    "✅ Confirm · ❌ Cancel · 🔁 Replace · ➕ Add qty."
+)
+
 HELP = (
     "Send a photo of one item (add the tag/box as extra photos in the same album).\n"
     "Caption: brand, the price number, gender, SKU, and optionally strap/colors in tag order — e.g.\n"
@@ -238,6 +249,10 @@ class IntakeBot:
         if typed == END_LABEL or typed.lower() in ("/end", "end intake", "selesai"):
             await self._end_requested(msg, user)
             return
+        if not any(ch.isalnum() for ch in typed) or typed.lower() in ("help", "bantuan", "?", "apa", "how"):
+            # "?", "??", "👍", "help": explain, never send to Claude as an edit.
+            await msg.reply_text(MARKS_HELP, parse_mode=ParseMode.HTML)
+            return
         session = self.store.active_session(msg.chat_id, user.id)
         if not session and typed.lower() in ("1", "intake", "1. intake"):
             await self._start_intake(msg, user)
@@ -437,8 +452,16 @@ class IntakeBot:
         r = review(self.catalog, f)
         e = html.escape
 
+        marked: list[str] = []  # fields actually shown with ❓
+
+        def q(key: str) -> str:
+            if key in f.uncertain:
+                marked.append(key)
+                return " ❓"
+            return ""
+
         def line(label: str, value, key: str | None = None) -> str:
-            mark = " ❓" if key and key in f.uncertain else ""
+            mark = q(key) if key and value not in (None, "") else ""
             return f"{label}: <b>{e(str(value))}</b>{mark}" if value not in (None, "") else f"{label}: —"
 
         lines = [f"<b>Item {e(intake.id)}</b>",
@@ -458,10 +481,11 @@ class IntakeBot:
         if f.selling_price:
             lines.append(line("Selling price", f"Rp{f.selling_price:,.0f}"))
         lines.append(line("Qty", f.quantity) if f.quantity is not None else f"Qty: <b>{DEFAULT_QUANTITY}</b> (default)")
-        seen = " · ".join(x for x in (f.photo_dial_color and f"dial {f.photo_dial_color}",
-                                      f.photo_index_type and f"{f.photo_index_type} index") if x)
+        seen = " · ".join(x for x in (
+            f.photo_dial_color and f"dial {e(f.photo_dial_color)}{q('photo_dial_color')}",
+            f.photo_index_type and f"{e(f.photo_index_type)} index{q('photo_index_type')}") if x)
         if seen:
-            lines.append(f"👁 Seen: {e(seen)}")
+            lines.append(f"👁 Seen: {seen}")
         if r.hjb:
             hbb = f"HBB Rp{r.hbb:,.0f} · " if r.hbb is not None else ""
             lines.append(f"💰 {hbb}HJB Rp{r.hjb:,.0f}")
@@ -494,8 +518,8 @@ class IntakeBot:
                              "restock, fine. A different model → reply with a descriptor, e.g. \"dial blue\".")
         if descriptor_note:
             lines.append(descriptor_note)
-        if f.uncertain:
-            lines.append("❓ = not sure from the photo, please check.")
+        if marked:
+            lines.append("❓ = not sure from the photo. Check it; if it's wrong, reply e.g. \"case gold\".")
         if r.errors:
             lines.append("\n<b>Needed before saving:</b>")
             lines += [f"• {e(err)}" for err in r.errors]

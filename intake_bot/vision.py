@@ -180,7 +180,8 @@ class Vision:
         # Seen dial/index are info, not the import's descriptor columns.
         data["photo_dial_color"] = data.pop("dial_color")
         data["photo_index_type"] = data.pop("index_type")
-        data["uncertain"] = [u for u in data["uncertain"] if u not in NOT_FROM_PHOTO]
+        rename = {"dial_color": "photo_dial_color", "index_type": "photo_index_type"}
+        data["uncertain"] = [rename.get(u, u) for u in data["uncertain"] if u not in NOT_FROM_PHOTO]
         data["notes"] = data["notes"] or None
         return ItemFields(**data)
 

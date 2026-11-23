@@ -68,3 +68,26 @@ def test_empty_session_and_greeting(tmp_path):
     sess = s.start_session(1, 2, "Ani")
     assert "Nothing was saved" in summary(s.end_session(sess.id), [], TZ, "Intake 2026-11")
     assert "1. 📦 <b>Intake</b>" in greeting("Ani") and "Hi Ani!" in greeting("Ani")
+
+
+def test_question_mark_reply_explains_and_never_edits(tmp_path):
+    import asyncio
+    from types import SimpleNamespace as NS
+    from intake_bot.bot import IntakeBot
+    from intake_bot.catalog import Catalog
+    sent = []
+    class Vision:
+        def correct(self, *a):
+            raise AssertionError("'?' must not be sent to Claude as a correction")
+    class Msg:
+        chat_id, reply_to_message = 1, None
+        def __init__(self, text): self.text, self.from_user = text, NS(id=2, first_name="A", full_name="A")
+        async def reply_text(self, text, **kw): sent.append(text)
+    s = Store(tmp_path / "x.sqlite3")
+    s.create("i1", 1, 2, "A", ItemFields(brand="Seiko", case_color="Silver", uncertain=["case_color"]), [])
+    bot = IntakeBot(NS(allowed_user_ids={2}, data_dir=tmp_path, timezone="Asia/Jakarta"), Catalog.load(), s,
+                    Vision(), None)
+    for t in ("?", "??", "👍", "help"):
+        asyncio.run(bot.text(NS(effective_message=Msg(t), effective_user=Msg(t).from_user), None))
+    assert len(sent) == 4 and all("What the marks mean" in x for x in sent)
+    assert s.get("i1").fields.uncertain == ["case_color"]   # unchanged
