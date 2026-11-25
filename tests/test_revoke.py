@@ -4,7 +4,7 @@ import asyncio
 from datetime import date
 
 from intake_bot.item import ItemFields
-from tests.test_group_bot import FIVE, Msg, last, make_bot, press, run, upd
+from tests.test_group_bot import FIVE, Msg, end_intake, last, make_bot, press, run, upd
 
 
 def rows(sheet):
@@ -20,6 +20,7 @@ def save_group(bot, st):
     run(bot.photo(upd(Msg(caption="Ac 5014 2.000.000 L 5 pcs", photo=True)), None))
     gid = st.latest_pending_group(1, 2).id
     press(bot, f"g:{gid}:confirm")
+    end_intake(bot, st)                         # written to the sheet
     return gid
 
 
@@ -51,10 +52,13 @@ def test_revoke_one_watch_of_a_group(tmp_path):
 def test_revoke_add_qty_and_replace(tmp_path):
     bot, st, sheet = make_bot(tmp_path, seiko())
     caption = "Seiko 1.250.000 sku SRPD53K1 G"
+    ids = []
     for n, action in ((1, "confirm"), (2, "addqty")):
         run(bot.photo(upd(Msg(caption=caption + (" 2pcs" if n == 2 else ""), photo=True)), None))
-        press(bot, f"{action}:{st.latest_pending(1, 2).id}")
-    first, second = [i for i in st.session_items(st.active_session(1, 2).id)]
+        ids.append(st.latest_pending(1, 2).id)
+        press(bot, f"{action}:{ids[-1]}")
+        end_intake(bot, st)
+    first, second = st.get(ids[0]), st.get(ids[1])
     assert rows(sheet) == [(first.id, 3, f"+2 ({second.id})")]
     run(bot.text(upd(Msg(f"revoke {second.id}")), None))
     assert "pcs taken off the line it was added to" in last()[0]
@@ -64,6 +68,7 @@ def test_revoke_add_qty_and_replace(tmp_path):
     run(bot.photo(upd(Msg(caption=caption + " 4pcs", photo=True)), None))
     third = st.latest_pending(1, 2)
     press(bot, f"replace:{third.id}")
+    end_intake(bot, st)
     assert rows(sheet) == [(third.id, 4, f"[replaces {first.id}]")]
     run(bot.text(upd(Msg(f"revoke {third.id}")), None))
     assert "the line it replaced is put back" in last()[0]
@@ -77,6 +82,7 @@ def test_older_day_warns_about_accounting_and_unknown_id(tmp_path):
     run(bot.photo(upd(Msg(caption="Seiko 1.250.000 sku SRPD53K1 G", photo=True)), None))
     item = st.latest_pending(1, 2)
     press(bot, f"confirm:{item.id}")
+    end_intake(bot, st)
     sheet.day = date(2026, 11, 26)
     run(bot.text(upd(Msg(f"revoke {item.id}")), None))
     assert "received on 2026-11-25" in last()[0] and "does NOT remove it there" in last()[0]
@@ -96,3 +102,16 @@ def test_revoke_never_touches_other_receipts_in_between(tmp_path):
     run(bot.text(upd(Msg(f"revoke {gid}")), None))
     press(bot, f"rv:{gid}:go")
     assert [r[0] for r in rows(sheet)] == ["OTHER-A", "OTHER-B"]
+
+
+
+def test_revoking_a_staged_item_keeps_it_out_of_the_sheet(tmp_path):
+    bot, st, sheet = make_bot(tmp_path, FIVE)
+    run(bot.photo(upd(Msg(caption="Ac 5014 2.000.000 L 5 pcs", photo=True)), None))
+    gid = st.latest_pending_group(1, 2).id
+    press(bot, f"g:{gid}:confirm")
+    run(bot.text(upd(Msg(f"revoke {gid}-2")), None))
+    assert "taken off the stage (not in the sheet yet)" in last()[0]
+    press(bot, f"rv:{gid}-2:go")
+    end_intake(bot, st)
+    assert [r[0] for r in rows(sheet)] == [f"{gid}-{n}" for n in (1, 3, 4, 5)]

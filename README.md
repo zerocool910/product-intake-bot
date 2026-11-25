@@ -17,9 +17,13 @@ Google Sheet in exactly the column shape the accounting app's
    **📦 1. Intake** or **🧰 2. Other tasks** (tap, or type 1 / 2).
 2. **Intake** opens a receiving session. Send one photo per item as below.
    A photo sent with no session open asks "Start intake & use it?".
-3. Tap **⏹ End intake** (kept at the bottom of the chat) or send `/end`.
+3. **✅ Confirm only stages** an item; nothing is written to the sheet during the
+   session. Tap **⏹ End intake** (kept at the bottom of the chat) or send `/end`.
    If items are still unconfirmed, the bot lists them first: show them,
    discard them and end, or keep receiving.
+   End intake then writes all staged items in one go (if the sheet can't be
+   reached, the session stays open and nothing is lost: tap End again). At
+   20:00 the bot reminds anyone whose session still has staged items.
 4. You get an **intake summary**: items, pieces, new vs restock, value at
    cost (HBB) and list (HJB), cancelled, and which sheet tab to import.
 

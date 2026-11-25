@@ -94,6 +94,12 @@ def last():
     return Msg.out[-1]
 
 
+def end_intake(bot, st):
+    """Tap End intake (writes the staged items), then open a new session."""
+    run(bot.text(upd(Msg("⏹ End intake")), None))
+    st.start_session(1, 2, "Ani")
+
+
 def test_five_watches_one_caption(tmp_path):
     master = NS(by_prefix=lambda p: [x for x in [Product("AC5014SS20C20Ldi11", stock_quantity=2)]
                                      if x.sku.upper().startswith(p.upper())])
@@ -107,12 +113,14 @@ def test_five_watches_one_caption(tmp_path):
     text, keys = last()
     assert "✔ 6 pcs = caption 6 pcs" in text and "✅ Confirm all 5" in keys
     press(bot, f"g:{st.latest_pending_group(1, 2).id}:confirm")
+    assert "5 item(s), 6 pcs staged" in last()[0] and sheet.current().get_all_records() == []
+    confirm_text = last()[0]
+    end_intake(bot, st)
     rows = sheet.current().get_all_records()
     assert [(r["preview_sku"], r["quantity"]) for r in rows] == [
         ("AC5014SS20C20Ldi20", 1), ("AC5014SS20C20Ldi11", 2), ("AC5014DT20C18Ldi11", 1),
         ("AC5014DT20C18Ldi01", 1), ("AC5014DT20C18Ldi20", 1)]
-    assert "5 item(s), 6 pcs saved" in last()[0]
-    assert "3. AC 5014 DT RSG Bd SIL diBRN. L - UOOO  ·  AC5014DT20C18Ldi11" in last()[0]
+    assert "3. AC 5014 DT RSG Bd SIL diBRN. L - UOOO  ·  AC5014DT20C18Ldi11" in confirm_text
 
 
 def test_no_gender_record_unsure_count_and_remove(tmp_path):
@@ -129,6 +137,7 @@ def test_no_gender_record_unsure_count_and_remove(tmp_path):
     press(bot, f"g:{gid}:countok")
     assert "✅ Confirm all 2" in last()[1]
     press(bot, f"g:{gid}:confirm")
+    end_intake(bot, st)
     assert len(sheet.current().get_all_records()) == 2
 
 
@@ -140,7 +149,7 @@ def test_single_photo_still_uses_the_single_flow(tmp_path):
     text, keys = last()
     assert text.startswith("Item ") and "✅ Confirm" in keys and st.latest_pending_group(1, 2) is None
     press(bot, f"confirm:{st.latest_pending(1, 2).id}")
-    assert "🏷 Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO\n🔖 SRPD53K1" in last()[0]
+    assert "staged" in last()[0] and "🏷 Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO\n🔖 SRPD53K1" in last()[0]
 
 
 def test_price_and_gender_per_colour_line(tmp_path):
@@ -164,6 +173,7 @@ def test_price_and_gender_per_colour_line(tmp_path):
     assert "→ AC 1044 SS BLK Bd BLK. G - DDCO\n    🔖 AC1044SS02C02G" in text
     assert "🔖 AC1044SS18C18Ldi01" in text
     press(bot, f"g:{gid}:confirm")
+    end_intake(bot, st)
     rows = sheet.current().get_all_records()
     assert [(r["preview_sku"], r["supplied_price"], r["gender"]) for r in rows] == [
         ("AC1044SS18C18Ldi01", 980000, "L"), ("AC1044SS18C18Ldi02", 980000, "L"),

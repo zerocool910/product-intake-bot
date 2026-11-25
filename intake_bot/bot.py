@@ -93,7 +93,8 @@ class IntakeBot:
         started = datetime.fromisoformat(session.started_at).astimezone(self.tz)
         await message.reply_text(
             f"📦 <b>Intake session started</b> ({started:%H:%M}).\n\n{HELP}\n\n"
-            f"When you're done, tap <b>{END_LABEL}</b> below (or send /end).",
+            f"✅ Confirm only stages an item; everything is written to the sheet when you tap "
+            f"<b>{END_LABEL}</b> below (or send /end).",
             parse_mode=ParseMode.HTML, reply_markup=self.SESSION_KEYS)
         waiting = self._waiting.pop((message.chat_id, user.id), None)
         if waiting:
@@ -121,10 +122,30 @@ class IntakeBot:
         await self._finish_session(message, session.id, user.first_name)
 
     async def _finish_session(self, message: Message, session_id: int, first_name: str | None) -> None:
+        written, notes, error = await self._commit_session(session_id)
+        if error:
+            left = sum(1 for i in self.store.session_items(session_id) if i.status == "staged")
+            await message.reply_text(
+                f"⚠️ Couldn't write to the sheet ({error}). {written} item(s) written, {left} still staged. "
+                f"Your session is still open: tap {END_LABEL} again in a moment.", reply_markup=self.SESSION_KEYS)
+            return
         session = self.store.end_session(session_id)
         text = session_summary(session, self.store.session_items(session_id), self.tz, self.sheet.tab_title())
+        if written:
+            text = f"💾 {written} item(s) written to the sheet.\n" + "\n".join(f"ℹ️ {n}" for n in notes) + \
+                   ("\n" if notes else "") + "\n" + text
         await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=ReplyKeyboardRemove())
         await self._show_menu(message, first_name)
+
+    async def remind_staged(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Evening reminder: staged items aren't in the sheet until the session ends."""
+        for s in self.store.open_sessions():
+            staged = [i for i in self.store.session_items(s.id) if i.status == "staged"]
+            if staged:
+                pcs = sum(i.saved_qty or 0 for i in staged)
+                await context.bot.send_message(
+                    s.chat_id, f"⏳ {s.user_name}: {len(staged)} item(s), {pcs} pcs are confirmed but NOT in the "
+                               f"sheet yet. Tap {END_LABEL} to write them.", reply_markup=self.SESSION_KEYS)
 
     async def _menu_or_end_button(self, query, user) -> None:
         kind, _, rest = query.data.partition(":")
@@ -414,9 +435,59 @@ class IntakeBot:
         r = review(self.catalog, intake.fields)
         if not r.ok:
             return "invalid", ""
-        row = self._build_row(intake, r, self.sheet.today().isoformat())
+        today = self.sheet.today().isoformat()
+        row = self._build_row(intake, r, today)
         qty = int(row.get("quantity") or 0)
-        return await self._write_row(intake, action, r, row, qty)
+        session = self.store.session(intake.session_id) if intake.session_id else None
+        if not session or session.ended_at:
+            return await self._write_row(intake, action, r, row, qty)   # no open session: write now
+        # Owner rule: inside a session nothing goes to the sheet until End intake.
+        conflicts = await self._today_conflicts(r.sku or "", intake.id)
+        if action == "confirm" and conflicts:
+            return "conflict", ""
+        intended = action if conflicts and action in ("replace", "addqty") else "added"
+        self.store.record_saved(intake.id, status="staged", action=intended, qty=qty, name=r.name or "",
+                                sku=r.sku or "", hbb=r.hbb, hjb=r.hjb, receipt_date=today)
+        target = str(conflicts[0].get("intake_id", "?")) if conflicts else ""
+        what = {"added": "new line", "replace": f"will replace today's {target}",
+                "addqty": f"will add to today's {target}"}[intended]
+        return "saved", (f"📝 {intake.id} staged ({qty} pcs, {what}). Written to the sheet when you end intake."
+                         f"\n🏷 {r.name or ''}\n🔖 {r.sku or ''}")
+
+    async def _today_conflicts(self, sku: str, exclude_id: str | None = None) -> list[dict]:
+        """Same SKU received today: rows already in the sheet plus items staged
+        (confirmed, not yet written) in any open session."""
+        if not sku:
+            return []
+        rows = await asyncio.to_thread(self.sheet.same_sku_today, sku)
+        staged = [{"intake_id": i.id, "quantity": i.saved_qty, "staged": True}
+                  for i in self.store.staged_today(sku, self.sheet.today().isoformat()) if i.id != exclude_id]
+        return rows + staged
+
+    async def _commit_session(self, session_id: int) -> tuple[int, list[str], str | None]:
+        """Write the session's staged items to the sheet. New lines first, then
+        Add qty / Replace (their target line then exists). Returns
+        (written, notes, error). Safe to call again after an error."""
+        staged = [i for i in self.store.session_items(session_id) if i.status == "staged"]
+        staged.sort(key=lambda i: (i.saved_action != "added", i.created_at))
+        written, notes = 0, []
+        for i in staged:
+            r = review(self.catalog, i.fields)
+            row = self._build_row(i, r, i.receipt_date or self.sheet.today().isoformat())
+            qty = int(row.get("quantity") or 0)
+            action = {"added": "confirm", "replace": "replace", "addqty": "addqty"}.get(i.saved_action or "", "confirm")
+            try:
+                status, _ = await self._write_row(i, action, r, row, qty)
+                if status == "conflict":
+                    # Another session wrote the same SKU today since this was confirmed:
+                    # treat it as more stock rather than overwrite someone else's line.
+                    status, _ = await self._write_row(i, "addqty", r, row, qty)
+                    notes.append(f"{i.id}: same SKU written today by another session, added to that line")
+            except Exception as err:
+                log.exception("Commit of %s failed", i.id)
+                return written, notes, f"{type(err).__name__}: {err}"
+            written += 1
+        return written, notes, None
 
     def _build_row(self, intake: Intake, r, receipt_date: str) -> dict:
         row = to_import_row(self.catalog, intake.fields)
@@ -490,7 +561,7 @@ class IntakeBot:
         """Saved items for a group id, a group item id (…-3) or a single item id."""
         group = self.store.group(target)
         items = self.store.group_items(target) if group else [x for x in [self.store.get(target)] if x]
-        return [i for i in items if i.status in ("confirmed", "merged") and i.saved_action]
+        return [i for i in items if i.status in ("confirmed", "merged", "staged") and i.saved_action]
 
     async def _revoke_plan(self, target: str) -> tuple[list[tuple[Intake, str, dict | None]], list[str]]:
         """[(item, what to do, located row)], plus warnings."""
@@ -500,6 +571,9 @@ class IntakeBot:
         plan, warnings = [], []
         today = self.sheet.today().isoformat()
         for i in items:
+            if i.status == "staged":
+                plan.append((i, "unstage", {"staged": True}))
+                continue
             if i.saved_action == "merged":
                 row = await asyncio.to_thread(self.sheet.find_merge_target, i.id, i.saved_qty or 0)
                 plan.append((i, "unmerge", row))
@@ -519,7 +593,8 @@ class IntakeBot:
                                  parse_mode=ParseMode.HTML)
             return
         lines = [f"🗑 <b>Revoke {e(target)}?</b>"]
-        what = {"delete": "line removed", "unmerge": "pcs taken off the line it was added to",
+        what = {"unstage": "taken off the stage (not in the sheet yet)",
+                "delete": "line removed", "unmerge": "pcs taken off the line it was added to",
                 "restore": "the line it replaced is put back"}
         for i, action, row in plan:
             name = e(i.saved_name or i.saved_sku or i.id)
@@ -548,7 +623,9 @@ class IntakeBot:
             if not row:
                 skipped.append(i.id)
                 continue
-            if kind == "delete":
+            if kind == "unstage":
+                pass                                          # never written: nothing to undo in the sheet
+            elif kind == "delete":
                 to_delete.append(row)
             elif kind == "unmerge":
                 await asyncio.to_thread(self.sheet.take_quantity, row, i.saved_qty or 0, i.id)
@@ -571,7 +648,7 @@ class IntakeBot:
         if self.store.group(target) and not self._revoke_targets(target):
             self.store.update_group(target, status="revoked")
         log.info("User %s revoked %s: %s", user.id, target, [i.id for i in done])
-        text = f"🗑 Revoked {len(done)} item(s), {sum(i.saved_qty or 0 for i in done)} pcs from the sheet."
+        text = f"🗑 Revoked {len(done)} item(s), {sum(i.saved_qty or 0 for i in done)} pcs."
         if skipped:
             text += f"\n⚠️ Not found in the sheet, left as is: {', '.join(skipped)}"
         await query.message.reply_text(text)
@@ -809,7 +886,7 @@ class IntakeBot:
                 conflicts = []
                 for i in items:
                     sku = review(self.catalog, i.fields).sku or ""
-                    if await asyncio.to_thread(self.sheet.same_sku_today, sku):
+                    if await self._today_conflicts(sku, i.id):
                         conflicts.append(i.position)
                 if conflicts:
                     await query.answer()
@@ -830,7 +907,9 @@ class IntakeBot:
                     status, text = await self._save_item(i, per_conflict)
                 (done if status == "saved" else problems).append((i, text))
             pcs = sum(int(review(self.catalog, i.fields).ok and (i.fields.quantity or DEFAULT_QUANTITY)) for i, _ in done)
-            lines = [f"✅ Group {group_id}: {len(done)} item(s), {pcs} pcs saved to {self.sheet.tab_title()}."]
+            staged = any(text.startswith("📝") for _, text in done)
+            where = "staged — written to the sheet when you end intake" if staged else f"saved to {self.sheet.tab_title()}"
+            lines = [f"✅ Group {group_id}: {len(done)} item(s), {pcs} pcs {where}."]
             for i, _ in done:
                 r = review(self.catalog, i.fields)
                 lines.append(f"{i.position}. {r.name}  ·  {r.sku}")
@@ -960,7 +1039,7 @@ class IntakeBot:
         same_sku: list = []
         if r.ok and not choices:
             try:
-                same_sku = await asyncio.to_thread(self.sheet.same_sku_today, r.sku or "")
+                same_sku = await self._today_conflicts(r.sku or "", intake.id)
                 dupes = await asyncio.to_thread(self.sheet.similar, to_import_row(self.catalog, f))
             except Exception:  # sheet hiccups must not block the summary
                 log.exception("Duplicate check failed")
@@ -1059,4 +1138,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))
     app.add_error_handler(on_error)
+    from datetime import time as _time
+    app.job_queue.run_daily(bot.remind_staged, time=_time(20, 0, tzinfo=ZoneInfo(settings.timezone)),
+                            name="remind-staged")
     return app

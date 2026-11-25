@@ -60,6 +60,7 @@ ITEM_COLUMNS = {
     "saved_sku": "TEXT",
     "saved_hbb": "REAL",
     "saved_hjb": "REAL",
+    "receipt_date": "TEXT",    # local date of the Confirm (the receipt's date in the sheet)
     "group_id": "TEXT",        # set when the item came from a multi-item photo
     "position": "INTEGER",     # 1, 2, 3 … left to right in that photo
 }
@@ -84,6 +85,7 @@ class Intake:
     saved_sku: str | None = None
     saved_hbb: float | None = None
     saved_hjb: float | None = None
+    receipt_date: str | None = None
     group_id: str | None = None
     position: int | None = None
 
@@ -160,7 +162,7 @@ class Store:
     def latest_pending(self, chat_id: int, user_id: int) -> Intake | None:
         row = self.db.execute(
             "SELECT * FROM items WHERE chat_id = ? AND user_id = ? AND status = 'pending' AND group_id IS NULL "
-            "ORDER BY created_at DESC LIMIT 1", (chat_id, user_id)).fetchone()
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1", (chat_id, user_id)).fetchone()
         return self._row(row) if row else None
 
     def update(self, intake_id: str, *, fields: ItemFields | None = None, status: str | None = None,
@@ -181,13 +183,23 @@ class Store:
         self.db.commit()
 
     def record_saved(self, intake_id: str, *, status: str, action: str, qty: int, name: str, sku: str,
-                     hbb: float | None, hjb: float | None) -> None:
-        """What Confirm wrote to the sheet, for the end-of-session summary."""
+                     hbb: float | None, hjb: float | None, receipt_date: str | None = None) -> None:
+        """What Confirm staged / wrote to the sheet, for the commit and the summary."""
         self.db.execute(
             "UPDATE items SET status = ?, saved_action = ?, saved_qty = ?, saved_name = ?, saved_sku = ?, "
-            "saved_hbb = ?, saved_hjb = ?, updated_at = ? WHERE id = ?",
-            (status, action, qty, name, sku, hbb, hjb, _now(), intake_id))
+            "saved_hbb = ?, saved_hjb = ?, receipt_date = COALESCE(?, receipt_date), updated_at = ? WHERE id = ?",
+            (status, action, qty, name, sku, hbb, hjb, receipt_date, _now(), intake_id))
         self.db.commit()
+
+    def staged_today(self, sku: str, day: str) -> list[Intake]:
+        """Confirmed-but-not-yet-written items (any open session) with this SKU on this date."""
+        rows = self.db.execute("SELECT * FROM items WHERE status = 'staged' AND UPPER(saved_sku) = UPPER(?) "
+                               "AND receipt_date = ? ORDER BY updated_at", (sku, day))
+        return [self._row(r) for r in rows]
+
+    def open_sessions(self) -> list[Session]:
+        rows = self.db.execute("SELECT * FROM sessions WHERE ended_at IS NULL ORDER BY id")
+        return [Session(**dict(r)) for r in rows]
 
     # ---------- multi-item groups ----------
 
@@ -221,7 +233,7 @@ class Store:
 
     def latest_pending_group(self, chat_id: int, user_id: int) -> Group | None:
         row = self.db.execute("SELECT * FROM groups WHERE chat_id = ? AND user_id = ? AND status = 'pending' "
-                              "ORDER BY created_at DESC LIMIT 1", (chat_id, user_id)).fetchone()
+                              "ORDER BY created_at DESC, rowid DESC LIMIT 1", (chat_id, user_id)).fetchone()
         return Group(**dict(row)) if row else None
 
     # ---------- intake sessions ----------
@@ -250,7 +262,7 @@ class Store:
         return self.session(session_id)
 
     def session_items(self, session_id: int) -> list[Intake]:
-        rows = self.db.execute("SELECT * FROM items WHERE session_id = ? ORDER BY created_at", (session_id,))
+        rows = self.db.execute("SELECT * FROM items WHERE session_id = ? ORDER BY created_at, rowid", (session_id,))
         return [self._row(r) for r in rows]
 
     @staticmethod
