@@ -23,6 +23,11 @@ Google Sheet in exactly the column shape the accounting app's
 4. You get an **intake summary**: items, pieces, new vs restock, value at
    cost (HBB) and list (HJB), cancelled, and which sheet tab to import.
 
+**Check a SKU or model (any time):** `cek SRPD53K1` or `cek AC 5014` (also
+`/cek`, or via 🧰 Other tasks). Shows whether it's in accounting with its
+stock (every variant for an AC/EXP/CA model) and what the bot has
+received for it. Read-only.
+
 ### Each item
 
 Send one photo, or an album with the item, tag and box, with a caption like:

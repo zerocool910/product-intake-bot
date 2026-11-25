@@ -26,6 +26,7 @@ from .config import Settings
 from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_rows, to_import_row
 from .master import MasterUnavailable, ProductMaster, base_reference, match, parse_descriptor
 from .naming import decode_cipher
+from .lookup import MIN_PREFIX, build_prefix, format_result, parse_lookup
 from .session import END_LABEL, greeting, summary as session_summary
 from .sheet import Sheet
 from .store import Intake, Store
@@ -131,8 +132,8 @@ class IntakeBot:
                 await self._start_intake(message, user)
             elif rest == "other":
                 await message.reply_text(
-                    "🧰 Other tasks aren't set up yet — for now I can only do 📦 Intake. "
-                    "Tell the owner what else you'd like me to do.", reply_markup=self.MENU)
+                    "🧰 <b>Other tasks</b>\n\n🔎 <b>Cek SKU / model</b>: type <code>cek SRPD53K1</code> or "
+                    "<code>cek AC 5014</code> to see if it's in accounting, its stock, and what the bot has received.", parse_mode=ParseMode.HTML, reply_markup=self.MENU)
             elif rest == "dismiss":
                 self._waiting.pop((message.chat_id, user.id), None)
                 await query.edit_message_text("OK, photo not used.")
@@ -189,6 +190,35 @@ class IntakeBot:
                                  parse_mode=ParseMode.HTML, reply_markup=self.SESSION_KEYS)
         else:
             await self._show_menu(msg, user.first_name)
+
+    async def lookup_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._allowed(update):
+            await self._lookup(update.effective_message, " ".join(context.args or []))
+
+    async def _lookup(self, msg: Message, query: str) -> None:
+        """Read-only: is this reference in accounting, with what stock, and what
+        has the bot received for it."""
+        if not query:
+            await msg.reply_text("Type the SKU or model after cek, e.g. <code>cek SRPD53K1</code> or "
+                                 "<code>cek AC 5014</code>.", parse_mode=ParseMode.HTML)
+            return
+        prefix, label = build_prefix(self.catalog, query)
+        if len(prefix) < MIN_PREFIX:
+            await msg.reply_text(f"Type at least {MIN_PREFIX} characters of the code.")
+            return
+        products = None
+        if self.master:
+            try:
+                products = await asyncio.to_thread(self.master.by_prefix, prefix)
+            except MasterUnavailable as err:
+                log.warning("Lookup: %s", err)
+        try:
+            rows = await asyncio.to_thread(self.sheet._history)
+            receipts = [r for r in rows if str(r.get("preview_sku", "")).upper().startswith(prefix)]
+        except Exception:
+            log.exception("Lookup: sheet history failed")
+            receipts = None
+        await msg.reply_text(format_result(label, prefix, products, receipts), parse_mode=ParseMode.HTML)
 
     async def end_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed(update):
@@ -266,6 +296,10 @@ class IntakeBot:
         if typed == END_LABEL or typed.lower() in ("/end", "end intake", "selesai"):
             await self._end_requested(msg, user)
             return
+        query = parse_lookup(typed)
+        if query is not None:
+            await self._lookup(msg, query)
+            return
         if not any(ch.isalnum() for ch in typed) or typed.lower() in ("help", "bantuan", "?", "apa", "how"):
             # "?", "??", "👍", "help": explain, never send to Claude as an edit.
             await msg.reply_text(MARKS_HELP, parse_mode=ParseMode.HTML)
@@ -275,7 +309,8 @@ class IntakeBot:
             await self._start_intake(msg, user)
             return
         if not session and typed.lower() in ("2", "other", "other tasks"):
-            await msg.reply_text("🧰 Other tasks aren't set up yet — for now I can only do 📦 Intake.",
+            await msg.reply_text("🧰 <b>Other tasks</b>\n\n🔎 <b>Cek SKU / model</b>: type <code>cek SRPD53K1</code> or "
+                    "<code>cek AC 5014</code> to see if it's in accounting, its stock, and what the bot has received.", parse_mode=ParseMode.HTML,
                                  reply_markup=self.MENU)
             return
         group = None
@@ -861,6 +896,7 @@ def build_application(settings: Settings) -> Application:
            .build())
     app.add_handler(CommandHandler(["start", "help", "menu"], bot.start))
     app.add_handler(CommandHandler(["end", "selesai"], bot.end_command))
+    app.add_handler(CommandHandler(["cek", "check"], bot.lookup_command))
     app.add_handler(MessageHandler(filters.PHOTO, bot.photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))
