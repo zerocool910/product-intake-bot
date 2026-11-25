@@ -24,6 +24,8 @@ Google Sheet in exactly the column shape the accounting app's
    End intake then writes all staged items in one go (if the sheet can't be
    reached, the session stays open and nothing is lost: tap End again). At
    20:00 the bot reminds anyone whose session still has staged items.
+   **📋 Recap** (or `rekap`, `/rekap`) lists what's staged so far: items,
+   pieces, HBB / HJB totals, ids, and anything not confirmed yet.
 4. You get an **intake summary**: items, pieces, new vs restock, value at
    cost (HBB) and list (HJB), cancelled, and which sheet tab to import.
 

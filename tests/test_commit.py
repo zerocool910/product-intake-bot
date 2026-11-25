@@ -45,3 +45,33 @@ def test_failed_write_keeps_the_session_open(tmp_path):
     sheet.append = real_append
     run(bot.text(upd(Msg("⏹ End intake")), None))
     assert rows(sheet) == [(item.id, 1, "")] and st.active_session(1, 2) is None
+
+
+def test_recap_lists_staged_and_unconfirmed(tmp_path):
+    bot, st, sheet = make_bot(tmp_path, seiko())
+    run(bot.text(upd(Msg("📋 Recap")), None))
+    assert "Nothing staged yet" in last()[0]
+    caption = "Seiko 1.250.000 sku SRPD53K1 G"
+    run(bot.photo(upd(Msg(caption=caption + " 2pcs", photo=True)), None))
+    a = st.latest_pending(1, 2)
+    press(bot, f"confirm:{a.id}")
+    run(bot.photo(upd(Msg(caption=caption, photo=True)), None))
+    b = st.latest_pending(1, 2)
+    press(bot, f"addqty:{b.id}")
+    run(bot.photo(upd(Msg(caption="Seiko 900.000 sku SNK809K1 G", photo=True)), None))
+    c = st.latest_pending(1, 2)                                   # not confirmed
+    run(bot.text(upd(Msg("rekap")), None))
+    text = last()[0]
+    assert "Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO · SRPD53K1 — 2 pcs" in text
+    assert "1 pcs ➕ adds to today's line" in text and f"id {a.id}" in text
+    assert "2 item(s), 3 pcs · HBB Rp2,495,325 · HJB Rp3,750,000" in text
+    assert f"Not confirmed yet (1): {c.id}" in text
+    assert rows(sheet) == []                                      # recap never writes
+    sid = st.active_session(1, 2).id
+    run(bot.text(upd(Msg("⏹ End intake")), None))                # 1 unconfirmed: asks first
+    assert "not confirmed yet" in last()[0]
+    press(bot, f"end:discard:{sid}")
+    assert rows(sheet) == [(a.id, 3, f"+1 ({b.id})")]
+    st.start_session(1, 2, "Ani")
+    run(bot.text(upd(Msg("rekap")), None))
+    assert "Nothing staged yet" in last()[0]

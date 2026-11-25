@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from .store import Intake, Session
 
 END_LABEL = "⏹ End intake"
+RECAP_LABEL = "📋 Recap"
 
 
 def greeting(first_name: str | None) -> str:
@@ -73,4 +74,30 @@ def summary(session: Session, items: list[Intake], tz: ZoneInfo, tab: str) -> st
         out.append(f"❌ Cancelled: {len(cancelled)}")
     out += ["", f"🗂 Sheet tab: <b>{html.escape(tab)}</b>. Import after today ends: rows dated today are "
                 "skipped by the importer."]
+    return "\n".join(out)
+
+
+def staged_recap(session: Session, items: list[Intake], tz: ZoneInfo) -> str:
+    """What this session has staged (confirmed, not yet in the sheet) and
+    what is still waiting for a Confirm."""
+    start = _local(session.started_at, tz)
+    staged = [i for i in items if i.status == "staged"]
+    pending = [i for i in items if i.status == "pending"]
+    out = [f"📋 <b>Staged so far</b> — session since {start:%H:%M} (not in the sheet yet)"]
+    if not staged:
+        out.append("Nothing staged yet.")
+    else:
+        what = {"added": "", "replace": " 🔁 replaces today's line", "addqty": " ➕ adds to today's line"}
+        for n, i in enumerate(staged, start=1):
+            out.append(f"{n}. <code>{html.escape(i.saved_name or i.id)}</code> · <code>{html.escape(i.saved_sku or '')}</code>"
+                       f" — <b>{i.saved_qty or 0} pcs</b>{what.get(i.saved_action or '', '')}")
+            out.append(f"    id <code>{html.escape(i.id)}</code>")
+        pcs = sum(i.saved_qty or 0 for i in staged)
+        hbb = sum((i.saved_hbb or 0) * (i.saved_qty or 0) for i in staged if i.saved_hbb is not None)
+        hjb = sum((i.saved_hjb or 0) * (i.saved_qty or 0) for i in staged if i.saved_hjb is not None)
+        out += ["", f"<b>{len(staged)}</b> item(s), <b>{pcs}</b> pcs · HBB {_rp(hbb)} · HJB {_rp(hjb)}"]
+    if pending:
+        ids = ", ".join(f"<code>{html.escape(i.id)}</code>" for i in pending)
+        out.append(f"⏳ Not confirmed yet ({len(pending)}): {ids}")
+    out += ["", f"Undo one: <code>revoke &lt;id&gt;</code>. Write all to the sheet: tap {END_LABEL}."]
     return "\n".join(out)

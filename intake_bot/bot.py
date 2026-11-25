@@ -28,7 +28,7 @@ from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_
 from .master import MasterUnavailable, ProductMaster, base_reference, match, parse_descriptor
 from .naming import decode_cipher
 from .lookup import MIN_PREFIX, build_prefix, format_result, matches_gender, parse_lookup
-from .session import END_LABEL, greeting, summary as session_summary
+from .session import END_LABEL, RECAP_LABEL, greeting, staged_recap, summary as session_summary
 from .sheet import Sheet
 from .store import Intake, Store
 from .group import (apply_change, apply_rules, count_check, descriptors_within_group, gender_from_codes,
@@ -45,7 +45,8 @@ MARKS_HELP = (
     "❓ next to a field — Claude wasn't sure from the photo. Check it; if wrong, reply e.g. <code>case gold</code>.\n"
     "❔ <b>Which product is this?</b> — tap the right product button (AC/EXP/CA).\n"
     "⚠️ <b>Product master not reachable</b> — couldn't check accounting this time; you can still confirm.\n\n"
-    "Undo a saved item or group: <code>revoke 20261125-8a6b15</code> (id from the confirmation).\n\n"
+    "Undo a saved item or group: <code>revoke 20261125-8a6b15</code> (id from the confirmation).\n"
+    "What's staged so far: tap 📋 Recap (or <code>rekap</code>).\n\n"
     "To change something, reply to the summary in plain words. Buttons under the message: "
     "✅ Confirm · ❌ Cancel · 🔁 Replace · ➕ Add qty."
 )
@@ -83,7 +84,7 @@ class IntakeBot:
 
     MENU = InlineKeyboardMarkup([[InlineKeyboardButton("📦 1. Intake", callback_data="menu:intake"),
                                   InlineKeyboardButton("🧰 2. Other tasks", callback_data="menu:other")]])
-    SESSION_KEYS = ReplyKeyboardMarkup([[END_LABEL]], resize_keyboard=True, is_persistent=True)
+    SESSION_KEYS = ReplyKeyboardMarkup([[RECAP_LABEL, END_LABEL]], resize_keyboard=True, is_persistent=True)
 
     async def _show_menu(self, message: Message, first_name: str | None) -> None:
         await message.reply_text(greeting(first_name), parse_mode=ParseMode.HTML, reply_markup=self.MENU)
@@ -256,6 +257,18 @@ class IntakeBot:
                 return
             await self._revoke_request(update.effective_message, context.args[0].lower())
 
+    async def recap_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._allowed(update):
+            await self._recap(update.effective_message, update.effective_user)
+
+    async def _recap(self, msg: Message, user) -> None:
+        session = self.store.active_session(msg.chat_id, user.id)
+        if not session:
+            await msg.reply_text("No intake session is open, so nothing is staged.")
+            return
+        await msg.reply_text(staged_recap(session, self.store.session_items(session.id), self.tz),
+                             parse_mode=ParseMode.HTML, reply_markup=self.SESSION_KEYS)
+
     async def end_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed(update):
             await self._end_requested(update.effective_message, update.effective_user)
@@ -329,6 +342,9 @@ class IntakeBot:
             return
         msg, user = update.effective_message, update.effective_user
         typed = (msg.text or "").strip()
+        if typed == RECAP_LABEL or typed.lower() in ("rekap", "recap", "staged", "/rekap", "/recap", "/staged"):
+            await self._recap(msg, user)
+            return
         if typed == END_LABEL or typed.lower() in ("/end", "end intake", "selesai"):
             await self._end_requested(msg, user)
             return
@@ -1134,6 +1150,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler(["end", "selesai"], bot.end_command))
     app.add_handler(CommandHandler(["cek", "check"], bot.lookup_command))
     app.add_handler(CommandHandler(["revoke", "batal"], bot.revoke_command))
+    app.add_handler(CommandHandler(["rekap", "recap", "staged"], bot.recap_command))
     app.add_handler(MessageHandler(filters.PHOTO, bot.photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))
