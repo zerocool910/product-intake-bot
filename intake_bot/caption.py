@@ -106,6 +106,21 @@ def parse_caption(catalog: Catalog, text: str | None) -> ItemFields:
     attrs, rest = parse_attributes(catalog, rest)
     out.update(attrs)
 
+    # "Ac 5014": for AC/EXP/CA the model token right after the brand is the
+    # ref code (staff rarely type "ref"). Taken out before the price is read.
+    if "ref_code" not in out:
+        for b in catalog.brands.items:
+            if not b.uses_generated_sku:
+                continue
+            keys = sorted(filter(None, (b.name, b.code, *b.aliases)), key=len, reverse=True)
+            alt = "|".join(re.escape(k) for k in keys)
+            m = re.search(rf"(?<!\w)(?:{alt})\s+([0-9A-Z]*\d[0-9A-Z]*)(?![\w.,])", rest, re.IGNORECASE)
+            if m and not re.fullmatch(r"\d+(?:k|rb|jt|juta|ribu)", m.group(1), re.IGNORECASE) \
+                    and not (m.group(1).isdigit() and int(m.group(1)) >= 10_000):
+                out["ref_code"] = m.group(1).upper()
+                rest = rest[:m.start(1)] + " " + rest[m.end(1):]
+                break
+
     if (price := parse_price(rest)) is not None:
         out["supplied_price"] = price
 

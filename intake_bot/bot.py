@@ -29,7 +29,9 @@ from .naming import decode_cipher
 from .session import END_LABEL, greeting, summary as session_summary
 from .sheet import Sheet
 from .store import Intake, Store
-from .vision import Vision, VisionError
+from .group import (apply_change, count_check, descriptors_within_group, gender_from_codes, parse_command,
+                    quick_change, split_caption)
+from .vision import PhotoResult, Vision, VisionError
 
 log = logging.getLogger(__name__)
 ALBUM_WAIT_SECONDS = 2.0
@@ -54,6 +56,8 @@ HELP = (
     "• Nett brands (Bonia, Timberland…): type the <b>cost</b>.\n"
     "• SALE brands: type the selling price.\n"
     "Clocks: add <code>JD</code> or <code>clock</code>, e.g. <code>Seiko JD 250k sku QXA756W</code>.\n"
+    "<b>Several watches of one model in one photo</b>: one caption for all, with the total as a check, e.g. "
+    "<code>Ac 5014 semua warna 2.000.000 5 pcs</code>. Fix one by number: <code>3 dial black</code>.\n"
     "Then reply to my summary in plain words to fix anything (\"rubber not leather, ladies\"), "
     "and press ✅ when it's right."
 )
@@ -142,13 +146,21 @@ class IntakeBot:
         await query.answer()
         await query.edit_message_reply_markup(None)
         if action == "review":
+            shown_groups = set()
             for i in pending:
-                await self._send_summary(message, i)
+                if i.group_id:
+                    if i.group_id not in shown_groups:
+                        shown_groups.add(i.group_id)
+                        await self._send_group_summary(message, i.group_id)
+                else:
+                    await self._send_summary(message, i)
             await message.reply_text(f"Confirm or cancel each one, then tap {END_LABEL} again.",
                                      reply_markup=self.SESSION_KEYS)
         elif action == "discard":
             for i in pending:
                 self.store.update(i.id, status="cancelled")
+                if i.group_id:
+                    self.store.update_group(i.group_id, status="cancelled")
             await self._finish_session(message, session.id, user.first_name)
         else:
             await message.reply_text("OK, keep sending photos.", reply_markup=self.SESSION_KEYS)
@@ -232,10 +244,15 @@ class IntakeBot:
             paths.append(str(path))
 
         try:
-            proposed = await asyncio.to_thread(self.vision.propose, images, caption)
+            result = await asyncio.to_thread(self.vision.propose_items, images, caption)
         except VisionError as e:
-            proposed = ItemFields(notes=f"Photo not read: {e}")
+            result = PhotoResult(count=1, count_sure=True, items=[ItemFields(notes=f"Photo not read: {e}")], notes="")
 
+        if len(result.items) > 1:
+            await status.delete()
+            await self._start_group(first, user, session_id, intake_id, result, caption, paths)
+            return
+        proposed = result.items[0]
         fields = apply_sale_price(self.catalog, proposed.merged(parse_caption(self.catalog, caption)))
         intake = self.store.create(intake_id, first.chat_id, user.id, user.full_name, fields, paths, session_id)
         await status.delete()
@@ -260,6 +277,16 @@ class IntakeBot:
         if not session and typed.lower() in ("2", "other", "other tasks"):
             await msg.reply_text("🧰 Other tasks aren't set up yet — for now I can only do 📦 Intake.",
                                  reply_markup=self.MENU)
+            return
+        group = None
+        if msg.reply_to_message:
+            group = self.store.group_by_message(msg.chat_id, msg.reply_to_message.message_id)
+        if not group:
+            pending_group = self.store.latest_pending_group(msg.chat_id, user.id)
+            if pending_group and (parse_command(typed) or not self.store.latest_pending(msg.chat_id, user.id)):
+                group = pending_group
+        if group and group.status == "pending":
+            await self._group_text(msg, group.id, typed)
             return
         intake = None
         if msg.reply_to_message:
@@ -289,6 +316,9 @@ class IntakeBot:
         if query.data.startswith(("menu:", "end:")):
             await self._menu_or_end_button(query, update.effective_user)
             return
+        if query.data.startswith("g:"):
+            await self._group_button(query)
+            return
         action, intake_id = query.data.split(":", 1)
         picked = None
         if action == "pick":
@@ -310,10 +340,24 @@ class IntakeBot:
             await query.message.reply_text(f"❌ {intake.id} cancelled — nothing written.")
             return
 
-        r = review(self.catalog, intake.fields)
-        if not r.ok:
+        status, text = await self._save_item(intake, action)
+        if status == "invalid":
             await query.answer("Still has problems — see the list.", show_alert=True)
             return
+        if status == "conflict":
+            await query.answer("Already received today: choose Replace or Add qty.", show_alert=True)
+            return
+        await query.answer("Saved.")
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text(text)
+
+    async def _save_item(self, intake: Intake, action: str) -> tuple[str, str]:
+        """Write one confirmed item to the sheet. action: confirm | replace | addqty.
+        Returns ("saved" | "conflict" | "invalid", message). "conflict" means the
+        same SKU was already received today and staff must choose replace/addqty."""
+        r = review(self.catalog, intake.fields)
+        if not r.ok:
+            return "invalid", ""
         row = to_import_row(self.catalog, intake.fields)
         notes = intake.fields.notes or ""
         row.update({
@@ -352,17 +396,14 @@ class IntakeBot:
             self.store.record_saved(intake.id, status=status, action=saved_action, qty=qty, name=r.name or "",
                                     sku=r.sku or "", hbb=r.hbb, hjb=r.hjb)
         elif action == "confirm" and today_rows:
-            await query.answer("Already received today: choose Replace or Add qty.", show_alert=True)
-            return
+            return "conflict", ""
         else:
             # New receipt line (a different date counts as a new receipt).
             await asyncio.to_thread(self.sheet.append, row)
             self.store.record_saved(intake.id, status="confirmed", action="added", qty=qty, name=r.name or "",
                                     sku=r.sku or "", hbb=r.hbb, hjb=r.hjb)
             text = f"✅ {intake.id} received ({qty} pcs) on {row['receipt_date']}, added to {self.sheet.tab_title()}."
-        await query.answer("Saved.")
-        await query.edit_message_reply_markup(None)
-        await query.message.reply_text(f"{text}\n{r.name or ''}")
+        return "saved", f"{text}\n{r.name or ''}"
 
     async def _apply_pick(self, message: Message, intake: Intake, picked: str) -> None:
         """Staff chose which existing product (or a new variant) this is."""
@@ -380,6 +421,230 @@ class IntakeBot:
                     reference_choice=sku if dial is None else None)
         self.store.update(intake.id, fields=ItemFields(**data))
         await self._send_summary(message, self.store.get(intake.id))
+
+    # ---------- multi-item photos ----------
+
+    async def _start_group(self, first: Message, user, session_id: int | None, base_id: str,
+                           result: PhotoResult, caption: str | None, paths: list[str]) -> None:
+        cap, total = split_caption(parse_caption(self.catalog, caption))
+        items = [apply_sale_price(self.catalog, seen.merged(cap)) for seen in result.items]
+        gender_note = None
+        if not items[0].gender:
+            gender, gender_note = await self._suggest_gender(items[0])
+            if gender:
+                items = [apply_change(f, {"gender": gender}) for f in items]
+        self.store.create_group(base_id, first.chat_id, user.id, session_id, result.count, result.count_sure,
+                                total, result.notes or None)
+        if gender_note:
+            self.store.update_group(base_id, gender_note=gender_note)
+        for pos, f in enumerate(items, start=1):
+            self.store.create(f"{base_id}-{pos}", first.chat_id, user.id, user.full_name, f, paths, session_id,
+                              group_id=base_id, position=pos)
+        await self._send_group_summary(first, base_id)
+
+    async def _suggest_gender(self, f: ItemFields) -> tuple[str | None, str | None]:
+        """Gender is never read from a photo. For an AC/EXP/CA model, propose
+        the one gender its existing references already use (product master,
+        then this sheet's history)."""
+        brand = self.catalog.brands.get(f.brand)
+        if not (brand and brand.uses_generated_sku and f.ref_code):
+            return None, None
+        prefix = f"{brand.code}{f.ref_code}".upper()
+        label = f"{brand.code} {f.ref_code}"
+        if self.master:
+            try:
+                products = await asyncio.to_thread(self.master.by_prefix, prefix)
+                if g := gender_from_codes(prefix, [p.sku for p in products]):
+                    return g, f"from existing {label} products"
+            except MasterUnavailable:
+                pass
+        try:
+            rows = await asyncio.to_thread(self.sheet._history)
+            if g := gender_from_codes(prefix, [str(r.get("preview_sku", "")) for r in rows]):
+                return g, f"from earlier {label} receipts"
+        except Exception:
+            log.exception("Gender lookup in the sheet failed")
+        return None, None
+
+    async def _prepare_group(self, group_id: str) -> tuple[list[Intake], dict[int, int], dict[str, str], dict[str, list[str]]]:
+        """Descriptors within the photo, then the product master check per item.
+        Returns (pending items, clashes {pos: other pos}, notes {id: note}, choices {id: options})."""
+        items = [i for i in self.store.group_items(group_id) if i.status == "pending"]
+        fixed, _ = descriptors_within_group(self.catalog, [i.fields for i in items])
+        for i, f in zip(items, fixed):
+            if f != i.fields:
+                self.store.update(i.id, fields=f)
+        notes, choices = {}, {}
+        items = [self.store.get(i.id) for i in items]
+        for n, i in enumerate(items):
+            i2, note, opts = await self._resolve_reference(i)
+            items[n] = i2
+            if note:
+                notes[i2.id] = note
+            if opts:
+                choices[i2.id] = opts
+        _, clashes_idx = descriptors_within_group(self.catalog, [i.fields for i in items])
+        clashes = {items[a].position: items[c].position for a, c in clashes_idx.items()}
+        return items, clashes, notes, choices
+
+    async def _send_group_summary(self, reply_to: Message, group_id: str) -> None:
+        group = self.store.group(group_id)
+        items, clashes, notes, choices = await self._prepare_group(group_id)
+        e = html.escape
+        if not items:
+            self.store.update_group(group_id, status="done")
+            await reply_to.reply_text("Nothing left in this group.")
+            return
+        first = items[0].fields
+        r0 = review(self.catalog, first)
+        lines = [f"🧺 <b>Group {e(group_id)}</b>: {e(first.brand or '?')} {e(first.ref_code or first.manufacturer_sku or '')}"
+                 f" — {len(items)} item(s)"]
+        if r0.hjb:
+            price = f"HLB/price Rp{(first.supplied_price or first.selling_price or 0):,.0f} each · "
+            lines.append(f"💰 {price}{'HBB Rp%s · ' % format(r0.hbb, ',.0f') if r0.hbb is not None else ''}HJB Rp{r0.hjb:,.0f}")
+        hint = self._tag_hint(group.notes or "", r0.hjb) if group.notes else None
+        if hint:
+            lines.append(hint)
+        genders = {i.fields.gender for i in items}
+        if None in genders:
+            lines.append("❗ <b>Gender needed for all</b> — tap below (never read from the photo).")
+        else:
+            src = f" ({e(group.gender_note)})" if group.gender_note else ""
+            lines.append(f"Gender: <b>{e(', '.join(sorted(g for g in genders if g)))}</b>{src}")
+        count_ok, count_line = count_check(group.seen_count, bool(group.count_sure), group.caption_total,
+                                           bool(group.count_ok), [i.fields for i in items])
+        lines += [count_line, ""]
+        all_ok = count_ok and None not in genders
+        for i in items:
+            f, r = i.fields, review(self.catalog, i.fields)
+            parts = [x for x in (self.catalog.strap_types.get(f.strap_type) and self.catalog.strap_types.get(f.strap_type).code,
+                                 f.strap_color, "Bd", f.case_color) if x]
+            seen = f" · dial {e(f.photo_dial_color)}" if f.photo_dial_color else ""
+            unsure = " ❓" if f.uncertain else ""
+            qty = f" ×{f.quantity}" if f.quantity is not None and f.quantity != 1 else ""
+            tag = "📦" if "Restock" in notes.get(i.id, "") else "🆕" if "New product" in notes.get(i.id, "") else ""
+            lines.append(f"<b>{i.position}.</b> {e(' '.join(parts))}{seen}{unsure}{qty} {tag}")
+            if r.name:
+                lines.append(f"    → <code>{e(r.name)}</code>")
+            problems = [err for err in r.errors if not err.startswith("gender")]
+            if i.position in clashes:
+                problems.append(f"same code as item {clashes[i.position]}: if it's the same watch, "
+                                f"\"hapus {i.position}\" and \"{clashes[i.position]} qty 2\"; else give its dial")
+            if i.id in choices:
+                problems.append("which existing product? reply e.g. \"%d dial blue\"" % i.position)
+            for p in problems:
+                lines.append(f"    ⚠️ {e(p)}")
+            if problems:
+                all_ok = False
+        lines += ["", "Fix one watch by its number: <code>3 dial black</code>, <code>2 qty 3</code>, "
+                      "<code>hapus 5</code>. For all: <code>semua L</code>."]
+        buttons: list[list[InlineKeyboardButton]] = []
+        if None in genders:
+            buttons.append([InlineKeyboardButton(t, callback_data=f"g:{group_id}:gender:{c}")
+                            for t, c in (("G", "Gents"), ("L", "Ladies"), ("G/L", "Gents/Ladies"))])
+        if not count_ok:
+            pcs = sum(i.fields.quantity if i.fields.quantity is not None else DEFAULT_QUANTITY for i in items)
+            buttons.append([InlineKeyboardButton(f"✅ {len(items)} items / {pcs} pcs is right",
+                                                 callback_data=f"g:{group_id}:countok")])
+        row = [InlineKeyboardButton("❌ Cancel all", callback_data=f"g:{group_id}:cancel")]
+        if all_ok:
+            row.insert(0, InlineKeyboardButton(f"✅ Confirm all {len(items)}", callback_data=f"g:{group_id}:confirm"))
+        buttons.append(row)
+        sent = await reply_to.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
+                                         reply_markup=InlineKeyboardMarkup(buttons))
+        if group.message_id:
+            try:
+                await reply_to.get_bot().edit_message_reply_markup(group.chat_id, group.message_id, reply_markup=None)
+            except Exception:
+                pass
+        self.store.update_group(group_id, message_id=sent.message_id)
+
+    async def _group_text(self, msg: Message, group_id: str, typed: str) -> None:
+        cmd = parse_command(typed)
+        items = {i.position: i for i in self.store.group_items(group_id) if i.status == "pending"}
+        if not cmd:
+            await msg.reply_text("Start with the item number to fix one watch (e.g. <code>3 dial black</code>), "
+                                 "or <code>semua …</code> for all.", parse_mode=ParseMode.HTML)
+            return
+        kind, n, rest = cmd
+        if kind in ("item", "remove") and n not in items:
+            await msg.reply_text(f"There's no item {n} in this group.")
+            return
+        if kind == "remove":
+            self.store.update(items[n].id, status="cancelled")
+        else:
+            targets = [items[n]] if kind == "item" else list(items.values())
+            change = quick_change(rest)
+            for i in targets:
+                if change:
+                    fields = apply_change(i.fields, change)
+                else:
+                    try:
+                        fields = await asyncio.to_thread(self.vision.correct, i.fields, rest)
+                    except VisionError as err:
+                        await msg.reply_text(f"Couldn't apply that to item {i.position}: {err}")
+                        return
+                self.store.update(i.id, fields=apply_sale_price(self.catalog, fields))
+        await self._send_group_summary(msg, group_id)
+
+    async def _group_button(self, query) -> None:
+        _, group_id, action, *arg = query.data.split(":")
+        group = self.store.group(group_id)
+        if not group or group.status != "pending":
+            await query.answer("Already handled.")
+            return
+        items = [i for i in self.store.group_items(group_id) if i.status == "pending"]
+        if action == "gender":
+            for i in items:
+                self.store.update(i.id, fields=apply_change(i.fields, {"gender": arg[0]}))
+            self.store.update_group(group_id, gender_note=None)
+            await query.answer(arg[0])
+            await self._send_group_summary(query.message, group_id)
+        elif action == "countok":
+            self.store.update_group(group_id, count_ok=1)
+            await query.answer("OK")
+            await self._send_group_summary(query.message, group_id)
+        elif action == "cancel":
+            for i in items:
+                self.store.update(i.id, status="cancelled")
+            self.store.update_group(group_id, status="cancelled")
+            await query.answer("Cancelled.")
+            await query.edit_message_reply_markup(None)
+            await query.message.reply_text(f"❌ Group {group_id} cancelled — nothing written.")
+        elif action in ("confirm", "confirm_add", "confirm_replace"):
+            per_conflict = {"confirm": "confirm", "confirm_add": "addqty", "confirm_replace": "replace"}[action]
+            if action == "confirm":
+                conflicts = []
+                for i in items:
+                    sku = review(self.catalog, i.fields).sku or ""
+                    if await asyncio.to_thread(self.sheet.same_sku_today, sku):
+                        conflicts.append(i.position)
+                if conflicts:
+                    await query.answer()
+                    await query.message.reply_text(
+                        f"🔁 Item(s) {', '.join(map(str, conflicts))} were already received <b>today</b>. "
+                        "Add these to today's lines, or replace them?", parse_mode=ParseMode.HTML,
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("➕ Add qty", callback_data=f"g:{group_id}:confirm_add"),
+                            InlineKeyboardButton("🔁 Replace", callback_data=f"g:{group_id}:confirm_replace"),
+                            InlineKeyboardButton("❌ Cancel all", callback_data=f"g:{group_id}:cancel")]]))
+                    return
+            await query.answer("Saving…")
+            await query.edit_message_reply_markup(None)
+            done, problems = [], []
+            for i in items:
+                status, text = await self._save_item(i, "confirm")
+                if status == "conflict":
+                    status, text = await self._save_item(i, per_conflict)
+                (done if status == "saved" else problems).append((i, text))
+            pcs = sum(int(review(self.catalog, i.fields).ok and (i.fields.quantity or DEFAULT_QUANTITY)) for i, _ in done)
+            lines = [f"✅ Group {group_id}: {len(done)} item(s), {pcs} pcs saved to {self.sheet.tab_title()}."]
+            lines += [f"{i.position}. {review(self.catalog, i.fields).name}" for i, _ in done]
+            if problems:
+                lines.append(f"⚠️ Not saved: {', '.join(str(i.position) for i, _ in problems)} — check them.")
+            else:
+                self.store.update_group(group_id, status="done")
+            await query.message.reply_text("\n".join(lines))
 
     # ---------- summary ----------
 

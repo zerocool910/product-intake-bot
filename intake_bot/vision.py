@@ -13,6 +13,8 @@ import logging
 from typing import Literal, Optional
 
 import anthropic
+from dataclasses import dataclass
+
 from pydantic import BaseModel
 
 from .catalog import Catalog
@@ -41,8 +43,8 @@ def _rules(catalog: Catalog) -> str:
 
 def _system(catalog: Catalog) -> str:
     # Stable across requests so it can be prompt-cached.
-    return f"""You help staff at a watch shop log incoming stock. You look at photos of one item \
-(the item itself, and sometimes its price tag or box) and fill in its catalog attributes.
+    return f"""You help staff at a watch shop log incoming stock. You look at photos of one or more items \
+(the items themselves, and sometimes price tags or boxes) and fill in its catalog attributes.
 
 {_rules(catalog)}
 
@@ -56,6 +58,13 @@ into notes as "tag cipher: EBB". Do not try to decode it.
 - dial_color and index_type: the dial's color and the hour-marker style (Numeral, Baton, Roman), \
 if you can see them. Null if not visible or not in the list.
 - Never fill gender, prices, quantity, ref_code or category. Those come from staff, not the photo.
+- A photo may show SEVERAL items side by side. Count them and give one entry per item, left to right
+(then top to bottom), position 1, 2, 3 … Set count_sure to false if items overlap, are cut off or hidden,
+or you are not sure of the count. Identical-looking items are still separate entries.
+- A bracelet mixing silver links with rose-gold or gold links is "Rantai Kombi"; its strap_color is the
+accent color (Rose Gold / Gold) and case_color is the case metal (often Silver).
+- Handwritten tags often show the model number and a letter price cipher (e.g. "5014" and "UOOO"): put the
+cipher in notes as "tag cipher: UOOO". Other handwritten numbers on tags mean nothing; ignore them.
 - Put every field you filled but are not sure about into `uncertain`. A wrong value that looks right \
 ends up printed on a tag, so leaving a field null or marking it uncertain is always better than guessing.
 - Keep notes short (one or two lines)."""
@@ -81,6 +90,38 @@ class PhotoFields(BaseModel):
     dial_color: Optional[str]
     index_type: Optional[str]
     uncertain: list[str]
+    notes: str
+
+
+class SeenItem(BaseModel):
+    """One item in a photo. No nullables ("" = can't tell), so a list of
+    them stays far under the API's limit on nullable fields."""
+
+    position: int
+    type: Literal["", "watch", "clock"]
+    strap_type: str
+    strap_color: str
+    case_color: str
+    dial_color: str
+    index_type: str
+    manufacturer_sku: str
+    uncertain: list[str]
+    notes: str
+
+
+class PhotoBatch(BaseModel):
+    brand: str
+    count: int
+    count_sure: bool
+    items: list[SeenItem]
+    notes: str
+
+
+@dataclass
+class PhotoResult:
+    count: int
+    count_sure: bool
+    items: list[ItemFields]
     notes: str
 
 
@@ -160,6 +201,31 @@ class Vision:
         if response.stop_reason == "max_tokens" or response.parsed_output is None:
             raise VisionError("Claude's answer was incomplete.")
         return response.parsed_output
+
+    def propose_items(self, images: list[tuple[bytes, str]], caption: str | None) -> PhotoResult:
+        """All items in the photo(s), left to right. One item -> a list of one."""
+        content: list = []
+        for data, media_type in images:
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": media_type,
+                "data": base64.standard_b64encode(data).decode("ascii")}})
+        text = "Count the items in the photo and fill in each one's fields. Use \"\" for anything you can't tell."
+        if caption:
+            text += f"\nStaff caption (may name the brand / model / price): {caption}"
+        content.append({"type": "text", "text": text})
+        batch: PhotoBatch = self._parse(content, effort="medium", schema=PhotoBatch)
+        rename = {"dial_color": "photo_dial_color", "index_type": "photo_index_type"}
+        items = []
+        for it in sorted(batch.items, key=lambda x: x.position):
+            items.append(ItemFields(
+                type=it.type or None, brand=batch.brand or None, strap_type=it.strap_type or None,
+                strap_color=it.strap_color or None, case_color=it.case_color or None,
+                manufacturer_sku=it.manufacturer_sku or None, photo_dial_color=it.dial_color or None,
+                photo_index_type=it.index_type or None, notes=it.notes or None,
+                uncertain=[rename.get(u, u) for u in it.uncertain if u not in NOT_FROM_PHOTO]))
+        return PhotoResult(count=max(batch.count, len(items)), count_sure=batch.count_sure and batch.count == len(items),
+                           items=items or [ItemFields(notes="No item recognised in the photo.")],
+                           notes=batch.notes)
 
     def propose(self, images: list[tuple[bytes, str]], caption: str | None) -> ItemFields:
         """images: (bytes, media_type) pairs, all of the same item."""

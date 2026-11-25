@@ -34,6 +34,14 @@ Bonia 400rb Ladies sku BNB10123
 Seiko JD 250k sku QXA756W        (JD or "clock" = a clock)
 ```
 
+- **Several watches in one photo** (e.g. all colours of one model): one
+  caption for all, with the **total pieces as a checker**:
+  `Ac 5014 / semua warna 2.000.000 / 5 pcs`. Each watch becomes its own
+  line (1 pc each). The bot lists them 1, 2, 3 … left to right; fix one by
+  number (`3 dial black`, `2 qty 3`, `hapus 5`) or all (`semua L`). It won't
+  save until the pieces match the caption total, or staff confirm the count.
+  Gender is proposed from the model's existing products, else asked once.
+  For AC/EXP/CA the model number after the brand is the ref (`Ac 5014`).
 - **Strap and colors** can be typed in tag order, `{strap} {strap color} bd
   {case color}` (names or codes: `ss silver bd silver`, `LS BLK BD RSG`).
   Typed values override what Claude reads from the photo, so a full
