@@ -59,6 +59,7 @@ index_types:
   - {name: Numeral, code: NUM}
   - {name: Baton, code: BTN}
   - {name: Roman, code: ROM}
+  - {name: Arabic, code: ARB}   # owner 2026-11-25: 'Idx Arab'; add the same to accounting
 
 # Price-tag cipher, digit -> letter.
 cipher: {"0": O, "1": D, "2": U, "3": T, "4": A, "5": M, "6": B, "7": S, "8": C, "9": E}

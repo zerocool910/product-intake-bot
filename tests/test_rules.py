@@ -262,3 +262,11 @@ def test_full_caption_is_enough_without_claude():
     r = review(C, f)
     assert r.ok, r.errors
     assert r.name == "Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO"
+
+
+def test_arabic_index_type():
+    arb = C.index_types.get("Arabic")
+    assert arb and arb.code == "ARB" and C.index_types.get("arb") is arb
+    r = review(C, _watch(dial_color="Black", index_type="Arabic"))
+    assert r.name == "AC AE1200 SS SIL Bd SIL diBLK-idxARB. G - EMO"
+    assert r.sku == "ACAE1200SS18C18Gdi02idxARB"
