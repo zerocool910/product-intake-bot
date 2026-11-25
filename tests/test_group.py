@@ -92,3 +92,10 @@ def test_ac_ref_token_is_not_confused_with_prices():
     assert (f.brand, f.ref_code) == ("Expedition", "6800")
     f = parse_caption(C, "AC 1.250.000")                               # no model token
     assert (f.ref_code, f.supplied_price) == (None, 1_250_000)
+
+
+
+def test_quick_change_price_gender_qty():
+    assert quick_change("1.180.000 L") == {"supplied_price": 1_180_000, "gender": "Ladies"}
+    assert quick_change("980k G 2pcs") == {"supplied_price": 980_000, "gender": "Gents", "quantity": 2}
+    assert quick_change("1.180.000 rubber") is None          # anything else goes to Claude

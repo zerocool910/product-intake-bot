@@ -47,6 +47,19 @@ Seiko JD 250k sku QXA756W        (JD or "clock" = a clock)
   save until the pieces match the caption total, or staff confirm the count.
   Gender is proposed from the model's existing products, else asked once.
   For AC/EXP/CA the model number after the brand is the ref (`Ac 5014`).
+- **Different price / gender per colour** in one photo: one caption line
+  per colour, starting with the colour:
+  ```
+  AC 1044
+  Silver 980.000 L
+  Full black 1.180.000 G
+  Rose Gold 1.180.000 L
+  ```
+  A colour line applies to watches with that case colour; `Full <colour>`
+  to bracelet and case both that colour (wins over a plain colour line);
+  `Two tone` / `Kombi` to two-tone bracelets. Other lines apply to all. A
+  watch no line matches is flagged and blocks Confirm until fixed, e.g.
+  `4 1.180.000 G`.
 - **Strap and colors** can be typed in tag order, `{strap} {strap color} bd
   {case color}` (names or codes: `ss silver bd silver`, `LS BLK BD RSG`).
   Typed values override what Claude reads from the photo, so a full

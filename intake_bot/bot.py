@@ -7,6 +7,7 @@ as a service on any always-on machine.
 from __future__ import annotations
 
 import asyncio
+import re
 import html
 import logging
 from datetime import datetime, timezone
@@ -30,8 +31,8 @@ from .lookup import MIN_PREFIX, build_prefix, format_result, matches_gender, par
 from .session import END_LABEL, greeting, summary as session_summary
 from .sheet import Sheet
 from .store import Intake, Store
-from .group import (apply_change, count_check, descriptors_within_group, gender_from_codes, parse_command,
-                    quick_change, split_caption)
+from .group import (apply_change, apply_rules, count_check, descriptors_within_group, gender_from_codes,
+                    parse_command, quick_change, split_caption, split_variant_lines)
 from .vision import PhotoResult, Vision, VisionError
 
 log = logging.getLogger(__name__)
@@ -58,7 +59,9 @@ HELP = (
     "• SALE brands: type the selling price.\n"
     "Clocks: add <code>JD</code> or <code>clock</code>, e.g. <code>Seiko JD 250k sku QXA756W</code>.\n"
     "<b>Several watches of one model in one photo</b>: one caption for all, with the total as a check, e.g. "
-    "<code>Ac 5014 semua warna 2.000.000 5 pcs</code>. Fix one by number: <code>3 dial black</code>.\n"
+    "<code>Ac 5014 semua warna 2.000.000 5 pcs</code>. Different price per colour: one line each, e.g. "
+    "<code>Silver 980.000 L</code> / <code>Full black 1.180.000 G</code>. Fix one by number: "
+    "<code>3 dial black</code>, <code>4 1.180.000 G</code>.\n"
     "Then reply to my summary in plain words to fix anything (\"rubber not leather, ladies\"), "
     "and press ✅ when it's right."
 )
@@ -465,13 +468,19 @@ class IntakeBot:
 
     async def _start_group(self, first: Message, user, session_id: int | None, base_id: str,
                            result: PhotoResult, caption: str | None, paths: list[str]) -> None:
-        cap, total = split_caption(parse_caption(self.catalog, caption))
-        items = [apply_sale_price(self.catalog, seen.merged(cap)) for seen in result.items]
+        common, rules = split_variant_lines(self.catalog, caption, parse_caption)
+        cap, total = split_caption(parse_caption(self.catalog, common))
+        items = [seen.merged(cap) for seen in result.items]
+        items, unmatched = apply_rules(items, rules)
+        items = [apply_sale_price(self.catalog, f) for f in items]
         gender_note = None
-        if not items[0].gender:
+        if any(not f.gender for f in items):
             gender, gender_note = await self._suggest_gender(items[0])
             if gender:
-                items = [apply_change(f, {"gender": gender}) for f in items]
+                items = [f if f.gender else apply_change(f, {"gender": gender}) for f in items]
+        for n, problem in unmatched.items():
+            note = f"{items[n].notes or ''} [caption: {problem}]".strip()
+            items[n] = apply_change(items[n], {"notes": note})
         self.store.create_group(base_id, first.chat_id, user.id, session_id, result.count, result.count_sure,
                                 total, result.notes or None)
         if gender_note:
@@ -538,7 +547,12 @@ class IntakeBot:
         r0 = review(self.catalog, first)
         lines = [f"🧺 <b>Group {e(group_id)}</b>: {e(first.brand or '?')} {e(first.ref_code or first.manufacturer_sku or '')}"
                  f" — {len(items)} item(s)"]
-        if r0.hjb:
+        prices = {i.fields.supplied_price or i.fields.selling_price for i in items}
+        genders_all = {i.fields.gender for i in items}
+        per_item = len(prices) > 1 or len(genders_all - {None}) > 1
+        if per_item:
+            lines.append("💰 Prices / gender per item (from the caption lines), see below.")
+        elif r0.hjb:
             price = f"HLB/price Rp{(first.supplied_price or first.selling_price or 0):,.0f} each · "
             lines.append(f"💰 {price}{'HBB Rp%s · ' % format(r0.hbb, ',.0f') if r0.hbb is not None else ''}HJB Rp{r0.hjb:,.0f}")
         hint = self._tag_hint(group.notes or "", r0.hjb) if group.notes else None
@@ -563,6 +577,16 @@ class IntakeBot:
             qty = f" ×{f.quantity}" if f.quantity is not None and f.quantity != 1 else ""
             tag = "📦" if "Restock" in notes.get(i.id, "") else "🆕" if "New product" in notes.get(i.id, "") else ""
             lines.append(f"<b>{i.position}.</b> {e(' '.join(parts))}{seen}{unsure}{qty} {tag}")
+            if per_item:
+                g = self.catalog.genders.get(f.gender)
+                money = (f"Rp{(f.supplied_price or f.selling_price):,.0f}" if (f.supplied_price or f.selling_price)
+                         else "no price")
+                hbb = f" (HBB Rp{r.hbb:,.0f})" if r.hbb is not None else ""
+                lines.append(f"    {e(money)}{hbb} · {e(g.code if g else '? gender')}")
+            if "[caption:" in (f.notes or ""):
+                lines.append(f"    ⚠️ {e(f.notes[f.notes.index('[caption:') + 10:].rstrip(']'))} — "
+                             f"reply e.g. \"{i.position} 1.180.000 L\"")
+                all_ok = False
             if r.name:
                 lines.append(f"    → <code>{e(r.name)}</code>")
             problems = [err for err in r.errors if not err.startswith("gender")]
@@ -623,6 +647,9 @@ class IntakeBot:
                     except VisionError as err:
                         await msg.reply_text(f"Couldn't apply that to item {i.position}: {err}")
                         return
+                # Staff have now set this item themselves: the caption mismatch is resolved.
+                if fields.notes and "[caption:" in fields.notes:
+                    fields = apply_change(fields, {"notes": re.sub(r"\s*\[caption:[^\]]*\]", "", fields.notes) or None})
                 self.store.update(i.id, fields=apply_sale_price(self.catalog, fields))
         await self._send_group_summary(msg, group_id)
 

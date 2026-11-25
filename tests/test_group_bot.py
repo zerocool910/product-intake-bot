@@ -139,3 +139,44 @@ def test_single_photo_still_uses_the_single_flow(tmp_path):
     assert text.startswith("Item ") and "✅ Confirm" in keys and st.latest_pending_group(1, 2) is None
     press(bot, f"confirm:{st.latest_pending(1, 2).id}")
     assert "🏷 Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO\n🔖 SRPD53K1" in last()[0]
+
+
+def test_price_and_gender_per_colour_line(tmp_path):
+    # Real chat: AC 1044, five watches, one caption with a line per colour.
+    def w(strap_color, case, dial):
+        return ItemFields(type="watch", brand="Alexandre Christie", strap_type="Stainless St.",
+                          strap_color=strap_color, case_color=case, photo_dial_color=dial)
+    photo = [w("Silver", "Silver", "White"), w("Silver", "Silver", "Black"), w("Rose Gold", "Rose Gold", "White"),
+             w("Black", "Black", "Black"), w("Rose Gold", "Rose Gold", "Rose Gold")]
+    bot, st, sheet = make_bot(tmp_path, photo)
+    caption = "AC 1044\nSilver 980.000 L\nFull black 1.180.000 G\nRose Gold 1.180.000 L"
+    run(bot.photo(upd(Msg(caption=caption, photo=True)), None))
+    gid = st.latest_pending_group(1, 2).id
+    got = [(i.fields.supplied_price, i.fields.gender) for i in st.group_items(gid)]
+    assert got == [(980_000, "Ladies"), (980_000, "Ladies"), (1_180_000, "Ladies"),
+                   (1_180_000, "Gents"), (1_180_000, "Ladies")]
+    text, keys = last()
+    assert "Prices / gender per item" in text
+    assert "Rp980,000 (HBB Rp467,460) · L" in text and "Rp1,180,000 (HBB Rp562,860) · G" in text
+    assert "AC 1044 SS BLK Bd BLK. G - DDCO" in text and "✅ Confirm all 5" in keys
+    press(bot, f"g:{gid}:confirm")
+    rows = sheet.current().get_all_records()
+    assert [(r["preview_sku"], r["supplied_price"], r["gender"]) for r in rows] == [
+        ("AC1044SS18C18Ldi01", 980000, "L"), ("AC1044SS18C18Ldi02", 980000, "L"),
+        ("AC1044SS20C20Ldi01", 1180000, "L"), ("AC1044SS02C02G", 1180000, "G"),
+        ("AC1044SS20C20Ldi20", 1180000, "L")]
+
+
+def test_watch_no_caption_line_matches_blocks_until_fixed(tmp_path):
+    def w(strap_color, case):
+        return ItemFields(type="watch", brand="Alexandre Christie", strap_type="Stainless St.",
+                          strap_color=strap_color, case_color=case)
+    bot, st, sheet = make_bot(tmp_path, [w("Silver", "Silver"), w("Gold", "Gold")])
+    run(bot.photo(upd(Msg(caption="AC 1044\nSilver 980.000 L", photo=True)), None))
+    text, keys = last()
+    assert "no caption line matched its colours" in text and not any("Confirm" in k for k in keys)
+    run(bot.text(upd(Msg("2 1.180.000 L")), None))    # price + gender: applied directly, no Claude call
+    item2 = st.group_items(st.latest_pending_group(1, 2).id)[1].fields
+    assert (item2.supplied_price, item2.gender) == (1_180_000, "Ladies") and "[caption:" not in (item2.notes or "")
+    text, keys = last()
+    assert "no caption line matched" not in text and "✅ Confirm all 2" in keys
