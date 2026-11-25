@@ -60,6 +60,7 @@ def test_summary_counts_saved_items_only(tmp_path):
     assert "Rp4,400,000" in text                         # 1,250,000 × 3 + 650,000
     assert "1 SALE item(s) without a cost" in text
     assert "➕ added to an earlier line" in text
+    assert "Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO</code> · <code>SRPD53K1</code>" in text
     assert "Cancelled: 1" in text and "Intake 2026-11" in text
 
 

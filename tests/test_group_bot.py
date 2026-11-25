@@ -110,6 +110,7 @@ def test_five_watches_one_caption(tmp_path):
         ("AC5014SS20C20Ldi20", 1), ("AC5014SS20C20Ldi11", 2), ("AC5014DT20C18Ldi11", 1),
         ("AC5014DT20C18Ldi01", 1), ("AC5014DT20C18Ldi20", 1)]
     assert "5 item(s), 6 pcs saved" in last()[0]
+    assert "3. AC 5014 DT RSG Bd SIL diBRN. L - UOOO  ·  AC5014DT20C18Ldi11" in last()[0]
 
 
 def test_no_gender_record_unsure_count_and_remove(tmp_path):
@@ -136,3 +137,5 @@ def test_single_photo_still_uses_the_single_flow(tmp_path):
     run(bot.photo(upd(Msg(caption="Seiko 1.250.000 sku SRPD53K1 G", photo=True)), None))
     text, keys = last()
     assert text.startswith("Item ") and "✅ Confirm" in keys and st.latest_pending_group(1, 2) is None
+    press(bot, f"confirm:{st.latest_pending(1, 2).id}")
+    assert "🏷 Seiko SRPD53K1 SS SIL Bd SIL. G - DUMO\n🔖 SRPD53K1" in last()[0]

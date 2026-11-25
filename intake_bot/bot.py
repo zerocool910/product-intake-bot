@@ -403,7 +403,7 @@ class IntakeBot:
             self.store.record_saved(intake.id, status="confirmed", action="added", qty=qty, name=r.name or "",
                                     sku=r.sku or "", hbb=r.hbb, hjb=r.hjb)
             text = f"✅ {intake.id} received ({qty} pcs) on {row['receipt_date']}, added to {self.sheet.tab_title()}."
-        return "saved", f"{text}\n{r.name or ''}"
+        return "saved", f"{text}\n🏷 {r.name or ''}\n🔖 {r.sku or ''}"
 
     async def _apply_pick(self, message: Message, intake: Intake, picked: str) -> None:
         """Staff chose which existing product (or a new variant) this is."""
@@ -639,7 +639,9 @@ class IntakeBot:
                 (done if status == "saved" else problems).append((i, text))
             pcs = sum(int(review(self.catalog, i.fields).ok and (i.fields.quantity or DEFAULT_QUANTITY)) for i, _ in done)
             lines = [f"✅ Group {group_id}: {len(done)} item(s), {pcs} pcs saved to {self.sheet.tab_title()}."]
-            lines += [f"{i.position}. {review(self.catalog, i.fields).name}" for i, _ in done]
+            for i, _ in done:
+                r = review(self.catalog, i.fields)
+                lines.append(f"{i.position}. {r.name}  ·  {r.sku}")
             if problems:
                 lines.append(f"⚠️ Not saved: {', '.join(str(i.position) for i, _ in problems)} — check them.")
             else:

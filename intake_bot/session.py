@@ -60,7 +60,8 @@ def summary(session: Session, items: list[Intake], tz: ZoneInfo, tab: str) -> st
         marks = {"added": "", "replaced": " 🔁 replaced", "merged": " ➕ added to an earlier line"}
         for n, i in enumerate(saved, start=1):
             tag = {"new": " 🆕", "restock": " 📦"}.get(i.outcome or "", "")
-            out.append(f"{n}. <code>{html.escape(i.saved_name or i.saved_sku or i.id)}</code>"
+            ref = f" · <code>{html.escape(i.saved_sku)}</code>" if i.saved_sku and i.saved_name else ""
+            out.append(f"{n}. <code>{html.escape(i.saved_name or i.saved_sku or i.id)}</code>{ref}"
                        f" — <b>{i.saved_qty or 0} pcs</b>{tag}{marks.get(i.saved_action or '', '')}")
         out.append("")
         out.append(f"💰 At cost (HBB): <b>{_rp(hbb)}</b> · at list (HJB): <b>{_rp(hjb)}</b>")
