@@ -159,6 +159,8 @@ def test_price_and_gender_per_colour_line(tmp_path):
     assert "Prices / gender per item" in text
     assert "Rp980,000 (HBB Rp467,460) · L" in text and "Rp1,180,000 (HBB Rp562,860) · G" in text
     assert "AC 1044 SS BLK Bd BLK. G - DDCO" in text and "✅ Confirm all 5" in keys
+    assert "→ AC 1044 SS BLK Bd BLK. G - DDCO\n    🔖 AC1044SS02C02G" in text
+    assert "🔖 AC1044SS18C18Ldi01" in text
     press(bot, f"g:{gid}:confirm")
     rows = sheet.current().get_all_records()
     assert [(r["preview_sku"], r["supplied_price"], r["gender"]) for r in rows] == [

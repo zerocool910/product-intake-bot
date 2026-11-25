@@ -589,6 +589,8 @@ class IntakeBot:
                 all_ok = False
             if r.name:
                 lines.append(f"    → <code>{e(r.name)}</code>")
+                if r.sku:
+                    lines.append(f"    🔖 <code>{e(r.sku)}</code>")
             problems = [err for err in r.errors if not err.startswith("gender")]
             if i.position in clashes:
                 problems.append(f"same code as item {clashes[i.position]}: if it's the same watch, "
