@@ -78,26 +78,40 @@ def summary(session: Session, items: list[Intake], tz: ZoneInfo, tab: str) -> st
 
 
 def staged_recap(session: Session, items: list[Intake], tz: ZoneInfo) -> str:
-    """What this session has staged (confirmed, not yet in the sheet) and
-    what is still waiting for a Confirm."""
+    """Everything in this session: staged (confirmed, not yet in the sheet),
+    already in the sheet, waiting for a Confirm, and revoked / cancelled."""
     start = _local(session.started_at, tz)
     staged = [i for i in items if i.status == "staged"]
+    written = [i for i in items if i.status in ("confirmed", "merged") and i.saved_action]
     pending = [i for i in items if i.status == "pending"]
-    out = [f"📋 <b>Staged so far</b> — session since {start:%H:%M} (not in the sheet yet)"]
-    if not staged:
-        out.append("Nothing staged yet.")
-    else:
-        what = {"added": "", "replace": " 🔁 replaces today's line", "addqty": " ➕ adds to today's line"}
-        for n, i in enumerate(staged, start=1):
-            out.append(f"{n}. <code>{html.escape(i.saved_name or i.id)}</code> · <code>{html.escape(i.saved_sku or '')}</code>"
-                       f" — <b>{i.saved_qty or 0} pcs</b>{what.get(i.saved_action or '', '')}")
+    gone = [i for i in items if i.status in ("revoked", "cancelled", "replaced")]
+    out = [f"📋 <b>Session recap</b> — since {start:%H:%M}"]
+
+    def block(title: str, rows: list[Intake]) -> None:
+        what = {"replace": " 🔁 replaces today's line", "addqty": " ➕ adds to today's line",
+                "replaced": " 🔁 replaced a line", "merged": " ➕ added to a line"}
+        out.append("")
+        out.append(title)
+        for n, i in enumerate(rows, start=1):
+            out.append(f"{n}. <code>{html.escape(i.saved_name or i.id)}</code> · "
+                       f"<code>{html.escape(i.saved_sku or '')}</code> — <b>{i.saved_qty or 0} pcs</b>"
+                       f"{what.get(i.saved_action or '', '')}")
             out.append(f"    id <code>{html.escape(i.id)}</code>")
-        pcs = sum(i.saved_qty or 0 for i in staged)
-        hbb = sum((i.saved_hbb or 0) * (i.saved_qty or 0) for i in staged if i.saved_hbb is not None)
-        hjb = sum((i.saved_hjb or 0) * (i.saved_qty or 0) for i in staged if i.saved_hjb is not None)
-        out += ["", f"<b>{len(staged)}</b> item(s), <b>{pcs}</b> pcs · HBB {_rp(hbb)} · HJB {_rp(hjb)}"]
+        pcs = sum(i.saved_qty or 0 for i in rows)
+        hbb = sum((i.saved_hbb or 0) * (i.saved_qty or 0) for i in rows if i.saved_hbb is not None)
+        hjb = sum((i.saved_hjb or 0) * (i.saved_qty or 0) for i in rows if i.saved_hjb is not None)
+        out.append(f"   <b>{len(rows)}</b> item(s), <b>{pcs}</b> pcs · HBB {_rp(hbb)} · HJB {_rp(hjb)}")
+
+    if staged:
+        block(f"📝 <b>Staged — NOT in the sheet yet</b> (written when you tap {END_LABEL})", staged)
+    if written:
+        block("💾 <b>Already in the sheet</b>", written)
+    if not staged and not written:
+        out += ["", "Nothing confirmed in this session yet."]
     if pending:
-        ids = ", ".join(f"<code>{html.escape(i.id)}</code>" for i in pending)
-        out.append(f"⏳ Not confirmed yet ({len(pending)}): {ids}")
-    out += ["", f"Undo one: <code>revoke &lt;id&gt;</code>. Write all to the sheet: tap {END_LABEL}."]
+        out += ["", "⏳ Not confirmed yet ({}): {}".format(
+            len(pending), ", ".join(f"<code>{html.escape(i.id)}</code>" for i in pending))]
+    if gone:
+        out += ["", f"🗑 Revoked / cancelled: {len(gone)} (not counted above)"]
+    out += ["", f"Undo one: <code>revoke &lt;id&gt;</code>."]
     return "\n".join(out)
