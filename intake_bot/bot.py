@@ -45,6 +45,7 @@ MARKS_HELP = (
     "❓ next to a field — Claude wasn't sure from the photo. Check it; if wrong, reply e.g. <code>case gold</code>.\n"
     "❔ <b>Which product is this?</b> — tap the right product button (AC/EXP/CA).\n"
     "⚠️ <b>Product master not reachable</b> — couldn't check accounting this time; you can still confirm.\n\n"
+    "Undo a saved item or group: <code>revoke 20261125-8a6b15</code> (id from the confirmation).\n\n"
     "To change something, reply to the summary in plain words. Buttons under the message: "
     "✅ Confirm · ❌ Cancel · 🔁 Replace · ➕ Add qty."
 )
@@ -227,6 +228,13 @@ class IntakeBot:
             receipts = None
         await msg.reply_text(format_result(label, prefix, products, receipts), parse_mode=ParseMode.HTML)
 
+    async def revoke_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._allowed(update):
+            if not context.args:
+                await update.effective_message.reply_text("Send the id after revoke, e.g. /revoke 20261125-8a6b15")
+                return
+            await self._revoke_request(update.effective_message, context.args[0].lower())
+
     async def end_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed(update):
             await self._end_requested(update.effective_message, update.effective_user)
@@ -303,6 +311,9 @@ class IntakeBot:
         if typed == END_LABEL or typed.lower() in ("/end", "end intake", "selesai"):
             await self._end_requested(msg, user)
             return
+        if m := re.match(r"^/?(?:revoke|batal|cabut|undo)\s+(\d{8}-[0-9a-f]{6}(?:-\d{1,2})?)$", typed, re.I):
+            await self._revoke_request(msg, m.group(1).lower())
+            return
         query = parse_lookup(typed)
         if query is not None:
             await self._lookup(msg, query)
@@ -361,6 +372,9 @@ class IntakeBot:
         if query.data.startswith("g:"):
             await self._group_button(query)
             return
+        if query.data.startswith("rv:"):
+            await self._revoke_button(query, update.effective_user)
+            return
         action, intake_id = query.data.split(":", 1)
         picked = None
         if action == "pick":
@@ -400,6 +414,11 @@ class IntakeBot:
         r = review(self.catalog, intake.fields)
         if not r.ok:
             return "invalid", ""
+        row = self._build_row(intake, r, self.sheet.today().isoformat())
+        qty = int(row.get("quantity") or 0)
+        return await self._write_row(intake, action, r, row, qty)
+
+    def _build_row(self, intake: Intake, r, receipt_date: str) -> dict:
         row = to_import_row(self.catalog, intake.fields)
         notes = intake.fields.notes or ""
         row.update({
@@ -412,10 +431,11 @@ class IntakeBot:
             "notes": notes,
             "photo_dial_color": intake.fields.photo_dial_color or "",
             "photo_index_type": intake.fields.photo_index_type or "",
-            "receipt_date": self.sheet.today().isoformat(),
+            "receipt_date": receipt_date,
         })
-        qty = int(row.get("quantity") or 0)
+        return row
 
+    async def _write_row(self, intake: Intake, action: str, r, row: dict, qty: int) -> tuple[str, str]:
         # Same SKU already received TODAY -> staff chose Replace or Add qty.
         # Look it up again now: the day may have changed since the summary.
         today_rows = await asyncio.to_thread(self.sheet.same_sku_today, r.sku or "")
@@ -463,6 +483,98 @@ class IntakeBot:
                     reference_choice=sku if dial is None else None)
         self.store.update(intake.id, fields=ItemFields(**data))
         await self._send_summary(message, self.store.get(intake.id))
+
+    # ---------- revoke ----------
+
+    def _revoke_targets(self, target: str) -> list[Intake]:
+        """Saved items for a group id, a group item id (…-3) or a single item id."""
+        group = self.store.group(target)
+        items = self.store.group_items(target) if group else [x for x in [self.store.get(target)] if x]
+        return [i for i in items if i.status in ("confirmed", "merged") and i.saved_action]
+
+    async def _revoke_plan(self, target: str) -> tuple[list[tuple[Intake, str, dict | None]], list[str]]:
+        """[(item, what to do, located row)], plus warnings."""
+        items = self._revoke_targets(target)
+        ids = {i.id for i in items}
+        rows = {str(r["intake_id"]): r for r in await asyncio.to_thread(self.sheet.find_rows, ids)} if ids else {}
+        plan, warnings = [], []
+        today = self.sheet.today().isoformat()
+        for i in items:
+            if i.saved_action == "merged":
+                row = await asyncio.to_thread(self.sheet.find_merge_target, i.id, i.saved_qty or 0)
+                plan.append((i, "unmerge", row))
+            else:
+                row = rows.get(i.id)
+                plan.append((i, "restore" if i.saved_action == "replaced" else "delete", row))
+            if row and str(row.get("receipt_date", "")) < today:
+                warnings.append(f"{i.id} was received on {row.get('receipt_date')}")
+        return plan, warnings
+
+    async def _revoke_request(self, msg: Message, target: str) -> None:
+        plan, warnings = await self._revoke_plan(target)
+        e = html.escape
+        if not plan:
+            await msg.reply_text(f"Nothing saved found for <code>{e(target)}</code>. Check the id in the "
+                                 "confirmation message (e.g. 20261125-8a6b15, or 20261125-8a6b15-3 for one watch).",
+                                 parse_mode=ParseMode.HTML)
+            return
+        lines = [f"🗑 <b>Revoke {e(target)}?</b>"]
+        what = {"delete": "line removed", "unmerge": "pcs taken off the line it was added to",
+                "restore": "the line it replaced is put back"}
+        for i, action, row in plan:
+            name = e(i.saved_name or i.saved_sku or i.id)
+            found = "" if row else " ⚠️ not found in the sheet (edited by hand?)"
+            lines.append(f"• <code>{e(i.id)}</code> {name} · {i.saved_qty or 0} pcs — {what[action]}{found}")
+        if warnings:
+            lines.append("")
+            lines.append("⚠️ " + "; ".join(e(w) for w in warnings) + ". If it was already imported into "
+                         "accounting, revoking here does NOT remove it there — fix it in accounting too.")
+        await msg.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"🗑 Revoke {len(plan)}", callback_data=f"rv:{target}:go"),
+            InlineKeyboardButton("Keep", callback_data=f"rv:{target}:keep")]]))
+
+    async def _revoke_button(self, query, user) -> None:
+        _, target, action = query.data.split(":")
+        await query.answer()
+        await query.edit_message_reply_markup(None)
+        if action != "go":
+            await query.message.reply_text("OK, nothing revoked.")
+            return
+        plan, _ = await self._revoke_plan(target)      # fresh: the sheet may have changed
+        done, skipped, to_delete = [], [], []
+        # In-place changes first; deletions last, all together bottom-up, so
+        # deleting one row never shifts another row we still need to touch.
+        for i, kind, row in plan:
+            if not row:
+                skipped.append(i.id)
+                continue
+            if kind == "delete":
+                to_delete.append(row)
+            elif kind == "unmerge":
+                await asyncio.to_thread(self.sheet.take_quantity, row, i.saved_qty or 0, i.id)
+            else:  # restore the row this item replaced
+                old_id = re.search(r"\[replaces ([^\]]+)\]", str(row.get("notes", "")))
+                old = self.store.get(old_id.group(1)) if old_id else None
+                if old:
+                    old_r = review(self.catalog, old.fields)
+                    await asyncio.to_thread(self.sheet.rewrite_row, row,
+                                            self._build_row(old, old_r, str(row.get("receipt_date", ""))))
+                    self.store.record_saved(old.id, status="confirmed", action="added", qty=int(
+                        to_import_row(self.catalog, old.fields)["quantity"] or 0), name=old_r.name or "",
+                        sku=old_r.sku or "", hbb=old_r.hbb, hjb=old_r.hjb)
+                else:
+                    to_delete.append(row)
+            self.store.update(i.id, status="revoked")
+            done.append(i)
+        if to_delete:
+            await asyncio.to_thread(self.sheet.delete_rows, to_delete)
+        if self.store.group(target) and not self._revoke_targets(target):
+            self.store.update_group(target, status="revoked")
+        log.info("User %s revoked %s: %s", user.id, target, [i.id for i in done])
+        text = f"🗑 Revoked {len(done)} item(s), {sum(i.saved_qty or 0 for i in done)} pcs from the sheet."
+        if skipped:
+            text += f"\n⚠️ Not found in the sheet, left as is: {', '.join(skipped)}"
+        await query.message.reply_text(text)
 
     # ---------- multi-item photos ----------
 
@@ -942,6 +1054,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler(["start", "help", "menu"], bot.start))
     app.add_handler(CommandHandler(["end", "selesai"], bot.end_command))
     app.add_handler(CommandHandler(["cek", "check"], bot.lookup_command))
+    app.add_handler(CommandHandler(["revoke", "batal"], bot.revoke_command))
     app.add_handler(MessageHandler(filters.PHOTO, bot.photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))

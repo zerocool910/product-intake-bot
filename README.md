@@ -28,6 +28,14 @@ Google Sheet in exactly the column shape the accounting app's
 stock (every variant for an AC/EXP/CA model) and what the bot has
 received for it. Read-only.
 
+**Undo a save:** `revoke <id>` (or `batal <id>`, `/revoke <id>`) with the id
+from the confirmation: a group id (`20261125-8a6b15`) revokes the whole
+group, `20261125-8a6b15-3` one watch of it, a single item id that item.
+The bot lists what will change and asks first. A new line is removed; an
+"Add qty" is taken off the line it went into; a "Replace" puts the
+replaced line back. Rows from an earlier day may already be in
+accounting: the bot warns, and those must be fixed there too.
+
 ### Each item
 
 Send one photo, or an album with the item, tag and box, with a caption like:

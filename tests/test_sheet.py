@@ -30,6 +30,9 @@ class FakeWorksheet:
     def append_row(self, values, value_input_option=None):
         self.rows.append(list(values))
 
+    def delete_rows(self, index):
+        del self.rows[index - 1]
+
     def update(self, values, range_name, value_input_option=None):
         row, col = a1_to_rowcol(range_name)
         while len(self.rows) < row:

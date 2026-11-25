@@ -101,6 +101,50 @@ class Sheet:
             rows += [{**r, "_tab": ws.title} for r in ws.get_all_records(expected_headers=HEADER)]
         return rows
 
+    def _month_tabs(self) -> list[gspread.Worksheet]:
+        pattern = re.compile(rf"^{re.escape(self.prefix)} \d{{4}}-\d{{2}}$")
+        return sorted((w for w in self.book.worksheets() if pattern.match(w.title)), key=lambda w: w.title)
+
+    def find_rows(self, intake_ids: set[str]) -> list[dict]:
+        """Rows (any month tab) whose intake_id is in `intake_ids`, each with
+        "_ws" (the worksheet) and "_row" (its sheet row number)."""
+        found = []
+        for ws in self._month_tabs():
+            for i, r in enumerate(ws.get_all_records(expected_headers=HEADER)):
+                if str(r.get("intake_id", "")) in intake_ids:
+                    found.append({**r, "_ws": ws, "_row": i + 2})
+        return found
+
+    def find_merge_target(self, intake_id: str, qty: int) -> dict | None:
+        """The row an "Add qty" item was added to (its notes say "+qty (intake_id)")."""
+        mark = f"+{qty} ({intake_id})"
+        for ws in self._month_tabs():
+            for i, r in enumerate(ws.get_all_records(expected_headers=HEADER)):
+                if mark in str(r.get("notes", "")):
+                    return {**r, "_ws": ws, "_row": i + 2}
+        return None
+
+    @staticmethod
+    def delete_rows(rows: list[dict]) -> None:
+        """Delete located rows, bottom-up per tab so row numbers stay valid."""
+        for r in sorted(rows, key=lambda x: (x["_ws"].title, x["_row"]), reverse=True):
+            r["_ws"].delete_rows(r["_row"])
+
+    @staticmethod
+    def rewrite_row(located: dict, row: dict[str, object]) -> None:
+        located["_ws"].update(values=[[row.get(c, "") for c in HEADER]], range_name=f"A{located['_row']}",
+                              value_input_option="RAW")
+
+    @staticmethod
+    def take_quantity(located: dict, qty: int, intake_id: str) -> int:
+        """Undo an "Add qty": subtract it and drop its note. Returns the new quantity."""
+        ws = located["_ws"]
+        new_qty = max(0, int(located.get("quantity") or 0) - qty)
+        notes = " ".join(str(located.get("notes", "")).replace(f"+{qty} ({intake_id})", " ").split())
+        ws.update(values=[[new_qty]], range_name=rowcol_to_a1(located["_row"], QTY_COL), value_input_option="RAW")
+        ws.update(values=[[notes]], range_name=rowcol_to_a1(located["_row"], NOTES_COL), value_input_option="RAW")
+        return new_qty
+
     def same_sku_today(self, sku: str) -> list[dict]:
         """Rows received TODAY with this SKU. Earlier dates are separate receipts
         and aren't checked."""
