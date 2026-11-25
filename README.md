@@ -57,7 +57,10 @@ Seiko JD 250k sku QXA756W        (JD or "clock" = a clock)
   ```
   A colour line applies to watches with that case colour; `Full <colour>`
   to bracelet and case both that colour (wins over a plain colour line);
-  `Two tone` / `Kombi` to two-tone bracelets. Other lines apply to all. A
+  `Two tone` / `Kombi` to two-tone bracelets. Several colours on one line:
+  `Gold / Rose Gold 1.900.000 L` (small typos like `Rose Golf` are corrected
+  and shown). A number that isn't a valid price is flagged, never guessed.
+  Fix several at once: `1,3 1.900.000`. Other lines apply to all. A
   watch no line matches is flagged and blocks Confirm until fixed, e.g.
   `4 1.180.000 G`.
 - **Strap and colors** can be typed in tag order, `{strap} {strap color} bd

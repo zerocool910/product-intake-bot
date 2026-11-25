@@ -472,6 +472,7 @@ class IntakeBot:
         cap, total = split_caption(parse_caption(self.catalog, common))
         items = [seen.merged(cap) for seen in result.items]
         items, unmatched = apply_rules(items, rules)
+        read_as = [x for r in rules for x in r.read_as]
         items = [apply_sale_price(self.catalog, f) for f in items]
         gender_note = None
         if any(not f.gender for f in items):
@@ -481,8 +482,9 @@ class IntakeBot:
         for n, problem in unmatched.items():
             note = f"{items[n].notes or ''} [caption: {problem}]".strip()
             items[n] = apply_change(items[n], {"notes": note})
+        group_notes = " ".join(filter(None, [result.notes, *(f"[caption {x}]" for x in read_as)])) or None
         self.store.create_group(base_id, first.chat_id, user.id, session_id, result.count, result.count_sure,
-                                total, result.notes or None)
+                                total, group_notes)
         if gender_note:
             self.store.update_group(base_id, gender_note=gender_note)
         for pos, f in enumerate(items, start=1):
@@ -558,9 +560,15 @@ class IntakeBot:
         hint = self._tag_hint(group.notes or "", r0.hjb) if group.notes else None
         if hint:
             lines.append(hint)
+        for corr in re.findall(r"\[caption ([^\]]*)\]", group.notes or ""):
+            lines.append(f"✏️ {e(corr)}")
         genders = {i.fields.gender for i in items}
-        if None in genders:
+        missing_g = [str(i.position) for i in items if not i.fields.gender]
+        if missing_g and len(missing_g) == len(items):
             lines.append("❗ <b>Gender needed for all</b> — tap below (never read from the photo).")
+        elif missing_g:
+            lines.append(f"❗ <b>Gender missing for item {', '.join(missing_g)}</b> — tap below to set it "
+                         f"(the others keep theirs).")
         else:
             src = f" ({e(group.gender_note)})" if group.gender_note else ""
             lines.append(f"Gender: <b>{e(', '.join(sorted(g for g in genders if g)))}</b>{src}")
@@ -585,7 +593,7 @@ class IntakeBot:
                 lines.append(f"    {e(money)}{hbb} · {e(g.code if g else '? gender')}")
             if "[caption:" in (f.notes or ""):
                 lines.append(f"    ⚠️ {e(f.notes[f.notes.index('[caption:') + 10:].rstrip(']'))} — "
-                             f"reply e.g. \"{i.position} 1.180.000 L\"")
+                             f"reply with its price, e.g. \"{i.position} 1.234.000\"")
                 all_ok = False
             if r.name:
                 lines.append(f"    → <code>{e(r.name)}</code>")
@@ -632,13 +640,15 @@ class IntakeBot:
                                  "or <code>semua …</code> for all.", parse_mode=ParseMode.HTML)
             return
         kind, n, rest = cmd
-        if kind in ("item", "remove") and n not in items:
-            await msg.reply_text(f"There's no item {n} in this group.")
+        wanted = n if kind == "items" else [n] if kind in ("item", "remove") else []
+        if any(x not in items for x in wanted):
+            missing = ", ".join(str(x) for x in wanted if x not in items)
+            await msg.reply_text(f"There's no item {missing} in this group.")
             return
         if kind == "remove":
             self.store.update(items[n].id, status="cancelled")
         else:
-            targets = [items[n]] if kind == "item" else list(items.values())
+            targets = [items[x] for x in wanted] if wanted else list(items.values())
             change = quick_change(rest)
             for i in targets:
                 if change:
@@ -663,7 +673,9 @@ class IntakeBot:
             return
         items = [i for i in self.store.group_items(group_id) if i.status == "pending"]
         if action == "gender":
-            for i in items:
+            # Fill in only the items without a gender; caption lines may have set the others.
+            targets = [i for i in items if not i.fields.gender] or items
+            for i in targets:
                 self.store.update(i.id, fields=apply_change(i.fields, {"gender": arg[0]}))
             self.store.update_group(group_id, gender_note=None)
             await query.answer(arg[0])

@@ -1,6 +1,7 @@
 """Multi-item photo flow through the bot, with fake Telegram / Claude / sheet / master."""
 
 import asyncio
+import html
 import re
 from datetime import date
 from types import SimpleNamespace as NS
@@ -33,7 +34,8 @@ class Msg:
 
     async def reply_text(self, text, reply_markup=None, **kw):
         rows = getattr(reply_markup, "inline_keyboard", None) if reply_markup else None
-        Msg.out.append((re.sub("<[^>]+>", "", text), [b.text for r in rows for b in r] if rows else []))
+        shown = html.unescape(re.sub("<[^>]+>", "", text))   # what Telegram displays
+        Msg.out.append((shown, [b.text for r in rows for b in r] if rows else []))
         return Msg()
 
     async def delete(self):
@@ -182,3 +184,37 @@ def test_watch_no_caption_line_matches_blocks_until_fixed(tmp_path):
     assert (item2.supplied_price, item2.gender) == (1_180_000, "Ladies") and "[caption:" not in (item2.notes or "")
     text, keys = last()
     assert "no caption line matched" not in text and "✅ Confirm all 2" in keys
+
+
+def test_colour_list_typo_and_bad_price(tmp_path):
+    # Real chat: AC 2C43, "Gold / Rose Golf 1.900.0000 L" (two colours, a typo, a broken price).
+    def w(colour, dial):
+        return ItemFields(type="watch", brand="Alexandre Christie", strap_type="Stainless St.",
+                          strap_color=colour, case_color=colour, photo_dial_color=dial)
+    photo = [w("Gold", "White"), w("Silver", "Navy Blue"), w("Rose Gold", "White")]
+    bot, st, sheet = make_bot(tmp_path, photo)
+    run(bot.photo(upd(Msg(caption="AC 2C43\nSilver 1.700.000 L\nGold / Rose Golf 1.900.0000 L", photo=True)), None))
+    gid = st.latest_pending_group(1, 2).id
+    items = st.group_items(gid)
+    assert [i.fields.gender for i in items] == ["Ladies"] * 3          # rose gold matched despite the typo
+    assert [i.fields.supplied_price for i in items] == [None, 1_700_000, None]   # broken price never guessed
+    text, keys = last()
+    assert "'Rose Golf' read as Rose Gold" in text
+    assert text.count("price '1.900.0000'") == 2 and "Gender needed" not in text and "Gender missing" not in text
+    assert "no caption line matched" not in text and not any("Confirm" in k for k in keys)
+    run(bot.text(upd(Msg("1,3 1.900.000")), None))                   # both broken-price watches at once
+    items = st.group_items(gid)
+    assert [i.fields.supplied_price for i in items] == [1_900_000, 1_700_000, 1_900_000]
+    assert "✅ Confirm all 3" in last()[1]
+
+
+def test_gender_buttons_fill_only_missing(tmp_path):
+    def w(colour):
+        return ItemFields(type="watch", brand="Alexandre Christie", strap_type="Stainless St.",
+                          strap_color=colour, case_color=colour)
+    bot, st, sheet = make_bot(tmp_path, [w("Silver"), w("Black")])
+    run(bot.photo(upd(Msg(caption="AC 1044 980.000\nSilver G", photo=True)), None))
+    text, keys = last()
+    assert "Gender missing for item 2" in text
+    press(bot, f"g:{st.latest_pending_group(1, 2).id}:gender:Ladies")
+    assert [i.fields.gender for i in st.group_items(st.latest_pending_group(1, 2).id)] == ["Gents", "Ladies"]

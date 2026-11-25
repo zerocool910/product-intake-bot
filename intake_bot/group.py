@@ -35,6 +35,8 @@ def parse_command(text: str) -> tuple[str, int | None, str] | None:
         return "remove", int(m.group(1)), ""
     if m := re.match(r"^(?:semua|all|semuanya)\s+(.+)$", t, re.I):
         return "all", None, m.group(1)
+    if m := re.match(r"^(\d{1,2}(?:\s*[,+&]\s*\d{1,2})+)\s+(.+)$", t):     # "1,3 1.900.000"
+        return "items", [int(x) for x in re.findall(r"\d+", m.group(1))], m.group(2)
     if m := re.match(r"^#?(\d{1,2})[.):]?\s+(.+)$", t):
         return "item", int(m.group(1)), m.group(2)
     if t.lower() in _GENDER_WORDS:
@@ -154,8 +156,11 @@ _TWO_TONE = re.compile(r"^(?:two[\s-]?tone|kombi|combi|dt)\b", re.I)
 
 
 class VariantRule:
-    def __init__(self, line: str, color: str | None, full: bool, two_tone: bool, fields: ItemFields):
-        self.line, self.color, self.full, self.two_tone, self.fields = line, color, full, two_tone, fields
+    def __init__(self, line: str, colors: list[str], full: bool, two_tone: bool, fields: ItemFields,
+                 problem: str | None = None, read_as: list[str] | None = None):
+        self.line, self.colors, self.full, self.two_tone, self.fields = line, colors, full, two_tone, fields
+        self.problem = problem          # e.g. an unreadable price: items it matches are flagged
+        self.read_as = read_as or []    # typo corrections, e.g. "'Rose Golf' read as Rose Gold"
 
     def matches(self, f: ItemFields) -> int:
         """0 = no; higher = more specific (full colour > two-tone > case > strap)."""
@@ -164,20 +169,49 @@ class VariantRule:
         if self.two_tone:
             return 3 if (f.strap_type or "").lower() == "rantai kombi" else 0
         if self.full:
-            return 4 if same(f.strap_color, self.color) and same(f.case_color, self.color) else 0
-        if same(f.case_color, self.color):
+            return 4 if any(same(f.strap_color, c) and same(f.case_color, c) for c in self.colors) else 0
+        if any(same(f.case_color, c) for c in self.colors):
             return 2
-        if not f.case_color and same(f.strap_color, self.color):
+        if not f.case_color and any(same(f.strap_color, c) for c in self.colors):
             return 1
         return 0
 
 
+_SEP = re.compile(r"\s*(?:/|,|&|\+|\bdan\b|\band\b|\bor\b|\batau\b)\s*", re.I)
+_NUMBERISH = re.compile(r"(?<![\w.,])\d[\d.,]*\d(?:\s*(?:k|rb|jt|juta|ribu))?(?![\w.,])", re.I)
+
+
+def _read_colors(catalog: Catalog, text: str) -> tuple[list[str], list[str], list[str]]:
+    """'Gold / Rose Golf' -> (['Gold', 'Rose Gold'], ["'Rose Golf' read as Rose Gold"], [unknown])."""
+    import difflib
+    names = {c.name.lower(): c.name for c in catalog.colors.items}
+    names.update({c.code.lower(): c.name for c in catalog.colors.items})
+    found, read_as, unknown = [], [], []
+    for part in filter(None, (x.strip() for x in _SEP.split(text))):
+        key = part.lower()
+        if key in names:
+            found.append(names[key])
+            continue
+        close = difflib.get_close_matches(key, list(names), n=1, cutoff=0.8)
+        if close:
+            found.append(names[close[0]])
+            read_as.append(f"'{part}' read as {names[close[0]]}")
+        else:
+            unknown.append(part)
+    return found, read_as, unknown
+
+
 def split_variant_lines(catalog: Catalog, caption: str | None, parse) -> tuple[str, list[VariantRule]]:
-    """(text of the common lines, colour rules). `parse` is parse_caption."""
+    """(text of the common lines, colour rules). `parse` is parse_caption.
+
+    A colour line is: [full] <colour>[ / <colour> …] <price> <gender> …,
+    e.g. "Silver 1.700.000 L", "Gold / Rose Gold 1.900.000 L", "Full black 1.180.000 G".
+    Colours are read up to the first number or gender word; small typos are
+    corrected ("Rose Golf") and reported. A number that isn't a valid price
+    ("1.900.0000") is never guessed: the line's watches are flagged."""
+    from .caption import parse_price
     if not caption:
         return "", []
-    colors = sorted({k for c in catalog.colors.items for k in (c.name, c.code)}, key=len, reverse=True)
-    color_re = re.compile(r"^(" + "|".join(re.escape(c) for c in colors) + r")\b", re.I)
     common, rules = [], []
     for raw in caption.splitlines():
         line = " ".join(raw.split())
@@ -187,16 +221,25 @@ def split_variant_lines(catalog: Catalog, caption: str | None, parse) -> tuple[s
         if m := _FULL.match(rest):
             rest, full = rest[m.end():], True
         two_tone = bool(_TWO_TONE.match(rest))
-        m = color_re.match(rest)
+        # The colour part: everything before the first number / gender word.
+        head = re.split(r"(?<!\w)(?:\d|G/L\b|G\b|L\b|A\b|gents\b|ladies\b|unisex\b)", rest, maxsplit=1)[0]
+        colors, read_as, unknown = ([], [], []) if two_tone else _read_colors(catalog, head)
         fields = parse(catalog, line)
-        has_values = fields.supplied_price is not None or fields.selling_price is not None or fields.gender
-        is_brand_line = bool(fields.brand)
-        if (m or two_tone) and has_values and not is_brand_line:
-            color = catalog.colors.get(m.group(1)).name if m else None
+        bad = [t for t in _NUMBERISH.findall(line) if parse_price(t) is None and len(re.sub(r"\D", "", t)) >= 4]
+        has_values = (fields.supplied_price is not None or fields.selling_price is not None or fields.gender
+                      or bad)
+        if (colors or two_tone) and has_values and not fields.brand:
             data = fields.model_dump(exclude_unset=True)
             for k in ("strap_type", "strap_color", "case_color"):  # the colour picks watches; it doesn't set them
                 data.pop(k, None)
-            rules.append(VariantRule(line, color, full and not two_tone, two_tone, ItemFields(**data)))
+            problem = None
+            if bad:
+                data.pop("supplied_price", None)
+                problem = f"price '{bad[0]}' in \"{line}\" isn't a valid number"
+            elif unknown:
+                problem = f"colour '{unknown[0]}' in \"{line}\" not recognised"
+            rules.append(VariantRule(line, colors, full and not two_tone, two_tone, ItemFields(**data),
+                                     problem, read_as))
         else:
             common.append(raw)
     return "\n".join(common), rules
@@ -218,5 +261,8 @@ def apply_rules(items: list[ItemFields], rules: list[VariantRule]) -> tuple[list
             out.append(f)
             problems[i] = "matches two caption lines: " + " / ".join(rules[n].line for n in best)
         else:
-            out.append(f.merged(rules[best[0]].fields))
+            rule = rules[best[0]]
+            out.append(f.merged(rule.fields))
+            if rule.problem:
+                problems[i] = rule.problem
     return out, problems

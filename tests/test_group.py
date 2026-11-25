@@ -69,6 +69,8 @@ def test_commands():
     assert parse_command("3 dial black") == ("item", 3, "dial black")
     assert parse_command("semua L") == ("all", None, "L")
     assert parse_command("hapus 5") == ("remove", 5, "")
+    assert parse_command("1,3 1.900.000") == ("items", [1, 3], "1.900.000")
+    assert parse_command("1 + 3 L") == ("items", [1, 3], "L")
     assert parse_command("L") == ("all", None, "L")
     assert parse_command("rubber not leather") is None
     assert quick_change("L") == {"gender": "Ladies"}
