@@ -1,4 +1,4 @@
-> Mirror of `globaltimecollection-accounting/docs/product-naming-convention.md` at `4634f6b`. The accounting repo is the source of truth; re-copy it when it changes.
+> Mirror of `globaltimecollection-accounting/docs/product-naming-convention.md` at `a5d8fbe`. The accounting repo is the source of truth; re-copy it when it changes.
 
 # Product naming & coding convention
 
@@ -86,10 +86,12 @@ from the original `coding` sheet):
 | Khaki | 16 | | |
 
 **Index type** (used only inside Unique Descriptor, below): Numeral=NUM,
-Baton=BTN, Roman=ROM. Confirmed non-exhaustive ("there are others, but
-those three should be sufficient as per past experience") — keep this an
-open/extensible list in the schema, not a fixed enum, so a fourth style
-doesn't need a migration to add.
+Baton=BTN, Roman=ROM, Arabic=ARB. Confirmed non-exhaustive ("there are
+others, but those three should be sufficient as per past experience") —
+kept as an open/extensible list in the schema, not a fixed enum, so a
+new style doesn't need a migration to add; Arabic (owner update
+2026-11-25, from the old "Idx Arab" naming) is the first of those
+additions — a data change via `IndexTypeSeeder`, not a schema one.
 
 ## Brand code
 
@@ -110,16 +112,16 @@ code; there's nothing to look up, not a data gap.
 
 ## Name patterns
 
-**Watch** (owner update 2026-11-19, `{SKU}` added — **not yet in the
-accounting app as of `4634f6b`**; the bot already follows it):
+**Watch** (owner update 2026-11-19, `{SKU}` added):
 ```
 {Brand} {SKU} {Strap Type Code} {Strap Color Code} Bd {Case Color Code} {Unique Descriptor}. {Gender} - {Price Cipher Code}
 ```
 `{SKU}` is the manufacturer SKU (e.g. `SRPD53K1`), or for AC/EXP/CA the
-owner's ref code (e.g. `1007`) — the same rule as the Clock pattern, not
-the long built `Kode Barang`. Example: `AC 1007 SS BLK Bd BLK. G - EMO`.
-"Bd" = short for *Bodi* (slang for Case/Body) — a fixed, permanent token,
-not a placeholder.
+owner's ref code (e.g. `1007`) — the same rule as the Clock pattern
+below, **not** the long built `Kode Barang` (see **SKU / `Kode Barang`
+generation** below). Example: `AC 1007 SS BLK Bd BLK. G - EMO`. "Bd" =
+short for *Bodi* (slang for Case/Body) — a fixed, permanent token, not
+a placeholder.
 
 **Clock**:
 ```
@@ -130,18 +132,14 @@ Descriptor shown in what's been confirmed so far. "JD" is a fixed,
 permanent token like "Bd" — not derived from the brand's name. Seiko
 clocks (formerly modeled as a separate "Seiko JD" brand/pricing) are
 just brand "Seiko"; "JD" supplies the clock marker, so Seiko isn't typed
-in twice. Unlike the Watch pattern, {SKU / Ref Code} — the item's own
-manufacturer SKU, or a self-invented brand's ref code — is printed
-directly in the name here, not just stored internally.
+in twice.
 
 ~~Confirmed: for the **Watch** pattern, the AC/EXP/CA self-invented
-reference number does **not** appear in the printed name at all — it
-lives only in the internal SKU/`Kode Barang` field, below. The
-manufacturer SKU shown for other brands is externally meaningful (a
-customer or supplier can look it up); the self-invented number for
-AC/EXP/CA is purely internal bookkeeping. The Clock pattern above is the
-one exception: its {SKU / Ref Code} is printed in the name too.~~
-Superseded 2026-11-19: both patterns now print the SKU / ref code.
+reference number does not appear in the printed name at all — it lives
+only in the internal SKU/`Kode Barang` field. The Clock pattern above is
+the one exception.~~ Superseded 2026-11-19: both patterns now print the
+SKU/ref code — the owner wanted the same `{SKU}` treatment extended to
+Watch, not kept Clock-only.
 
 ## Unique Descriptor
 

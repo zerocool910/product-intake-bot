@@ -1,7 +1,7 @@
 # Brand table — mirror of docs/brand-pricing-reference.md.
 #
 # Names, codes and rates mirror globaltimecollection-accounting's
-# database/seeders/BrandSeeder.php (checked 2026-11-13 at 4634f6b). `name`
+# database/seeders/BrandSeeder.php (checked 2026-11-25 at a5d8fbe). `name`
 # must match exactly: the importer looks brands up by name only.
 #
 # Pricing fields are used only for the confirm-time preview; the accounting app's Brand::priceBreakdown()
