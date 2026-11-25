@@ -23,18 +23,43 @@ def parse_lookup(text: str) -> str | None:
     return (m.group(1) or "").strip() if m else None
 
 
-def build_prefix(catalog: Catalog, query: str) -> tuple[str, str]:
-    """(reference prefix, label). 'AC 5014' / 'Alexandre Christie 5014' ->
-    ('AC5014', 'Alexandre Christie 5014'); 'srpd53k1' -> ('SRPD53K1', 'SRPD53K1')."""
+_GENDERS = {"G": "G", "GENTS": "G", "PRIA": "G", "L": "L", "LADIES": "L", "WANITA": "L",
+            "A": "A", "UNISEX": "A", "G/L": "G/L"}
+
+
+def build_prefix(catalog: Catalog, query: str) -> tuple[str, str, str | None]:
+    """(reference prefix, label, gender filter code or None).
+
+    The first word after the brand is the model / SKU; a gender word after it
+    filters ('cek AC 2C07 L' -> AC2C07…L codes), it isn't part of the code.
+    'AC 5014' -> ('AC5014', 'Alexandre Christie 5014', None);
+    'Seiko SRPD53K1' / 'srpd53k1' -> ('SRPD53K1', 'SRPD53K1', None)."""
     words = query.split()
+    gender = None
+    while len(words) > 1 and words[-1].upper() in _GENDERS:
+        gender = _GENDERS[words.pop().upper()]
     for n in (3, 2, 1):  # brand names can be several words
         if len(words) > n:
             brand = catalog.brands.get(" ".join(words[:n]))
-            if brand and brand.uses_generated_sku:
-                ref = "".join(words[n:]).upper()
-                return f"{brand.code}{ref}".upper(), f"{brand.name} {ref}"
-    flat = "".join(words).upper()
-    return flat, flat
+            if brand:
+                code = words[n].upper()
+                if brand.uses_generated_sku:
+                    return f"{brand.code}{code}".upper(), f"{brand.name} {code}", gender
+                return code, f"{brand.name} {code}", gender
+    flat = (words[0] if words else "").upper()
+    return flat, flat, gender
+
+
+_SKU_GENDER = re.compile(r"[A-Z]{2}\d{2}C\d{2}(G/L|G|L|A)", re.IGNORECASE)
+
+
+def matches_gender(prefix: str, sku: str, gender: str | None) -> bool:
+    """For built AC/EXP/CA codes the gender sits after the case color
+    (…SS20C20L…); other SKUs don't carry one, so they always pass."""
+    if not gender:
+        return True
+    m = _SKU_GENDER.match(sku[len(prefix):])
+    return bool(m) and m.group(1).upper() == gender if m else True
 
 
 def _qty(v) -> int:

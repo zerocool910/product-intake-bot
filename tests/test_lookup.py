@@ -16,10 +16,21 @@ def test_parse_and_prefix():
     assert parse_lookup("cek SRPD53K1") == "SRPD53K1"
     assert parse_lookup("/cek") == "" and parse_lookup("Cek ac 5014") == "ac 5014"
     assert parse_lookup("Seiko 1.250.000") is None and parse_lookup("check-in") is None
-    assert build_prefix(C, "ac 5014") == ("AC5014", "Alexandre Christie 5014")
-    assert build_prefix(C, "Alexandre Christie 2C07") == ("AC2C07", "Alexandre Christie 2C07")
-    assert build_prefix(C, "srpd53k1") == ("SRPD53K1", "SRPD53K1")
-    assert build_prefix(C, "Seiko SRPD53K1")[0] == "SEIKOSRPD53K1"   # non-AC brand name isn't a prefix
+    assert build_prefix(C, "ac 5014") == ("AC5014", "Alexandre Christie 5014", None)
+    assert build_prefix(C, "Alexandre Christie 2C07") == ("AC2C07", "Alexandre Christie 2C07", None)
+    assert build_prefix(C, "srpd53k1") == ("SRPD53K1", "SRPD53K1", None)
+    assert build_prefix(C, "Seiko SRPD53K1") == ("SRPD53K1", "Seiko SRPD53K1", None)
+    # From a real chat: the gender after the model is a filter, not part of the code.
+    assert build_prefix(C, "AC 2C07 L") == ("AC2C07", "Alexandre Christie 2C07", "L")
+    assert build_prefix(C, "ac 1014 g/l") == ("AC1014", "Alexandre Christie 1014", "G/L")
+
+
+def test_gender_filter():
+    from intake_bot.lookup import matches_gender
+    assert matches_gender("AC2C07", "AC2C07SS20C20Ldi15", "L")
+    assert not matches_gender("AC2C07", "AC2C07SS20C20Ldi15", "G")
+    assert matches_gender("AC1014", "AC1014LS02C18G/L", "G/L") and not matches_gender("AC1014", "AC1014LS02C18G/L", "G")
+    assert matches_gender("SRPD53K1", "SRPD53K1", "G")       # manufacturer SKUs carry no gender
 
 
 def test_format_found_variants_missing_and_unreachable():
@@ -45,6 +56,17 @@ def test_cek_from_chat_never_touches_pending_items(tmp_path):
     st.create("i1", 1, 2, "Ani", __import__("intake_bot.item", fromlist=["ItemFields"]).ItemFields(brand="Seiko"), [])
     asyncio.run(bot.text(upd(Msg("cek srpd53k1")), None))
     assert "📦 In accounting: SRPD53K1" in Msg.out[-1][0] and "Stock: 2" in Msg.out[-1][0]
+    asyncio.run(bot.text(upd(Msg("cek Seiko SRPD53K1 G")), None))
+    assert "📦 In accounting: SRPD53K1" in Msg.out[-1][0]
     asyncio.run(bot.text(upd(Msg("cek DOWN1")), None))
     assert "Accounting not reachable" in Msg.out[-1][0]
     assert st.get("i1").status == "pending" and st.get("i1").fields.brand == "Seiko"
+
+
+def test_cek_model_with_gender_lists_its_variants(tmp_path):
+    variants = [Product(f"AC2C07SS20C20Ldi{d}", "", 0) for d in ("01", "11", "15", "20")] + [Product("AC2C07SS20C20Gdi01", "", 0)]
+    bot, st, sheet = make_bot(tmp_path, [], master=NS(by_prefix=lambda p: [x for x in variants if x.sku.startswith(p)]))
+    asyncio.run(bot.text(upd(Msg("Cek AC 2C07 L")), None))
+    text = Msg.out[-1][0]
+    assert "Alexandre Christie 2C07 (L)" in text and "In accounting AC2C07 (4):" in text
+    assert "AC2C07SS20C20Gdi01" not in text

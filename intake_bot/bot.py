@@ -26,7 +26,7 @@ from .config import Settings
 from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_rows, to_import_row
 from .master import MasterUnavailable, ProductMaster, base_reference, match, parse_descriptor
 from .naming import decode_cipher
-from .lookup import MIN_PREFIX, build_prefix, format_result, parse_lookup
+from .lookup import MIN_PREFIX, build_prefix, format_result, matches_gender, parse_lookup
 from .session import END_LABEL, greeting, summary as session_summary
 from .sheet import Sheet
 from .store import Intake, Store
@@ -202,7 +202,9 @@ class IntakeBot:
             await msg.reply_text("Type the SKU or model after cek, e.g. <code>cek SRPD53K1</code> or "
                                  "<code>cek AC 5014</code>.", parse_mode=ParseMode.HTML)
             return
-        prefix, label = build_prefix(self.catalog, query)
+        prefix, label, gender = build_prefix(self.catalog, query)
+        if gender:
+            label += f" ({gender})"
         if len(prefix) < MIN_PREFIX:
             await msg.reply_text(f"Type at least {MIN_PREFIX} characters of the code.")
             return
@@ -210,11 +212,13 @@ class IntakeBot:
         if self.master:
             try:
                 products = await asyncio.to_thread(self.master.by_prefix, prefix)
+                products = [p for p in products if matches_gender(prefix, p.sku, gender)]
             except MasterUnavailable as err:
                 log.warning("Lookup: %s", err)
         try:
             rows = await asyncio.to_thread(self.sheet._history)
-            receipts = [r for r in rows if str(r.get("preview_sku", "")).upper().startswith(prefix)]
+            receipts = [r for r in rows if str(r.get("preview_sku", "")).upper().startswith(prefix)
+                        and matches_gender(prefix, str(r.get("preview_sku", "")), gender)]
         except Exception:
             log.exception("Lookup: sheet history failed")
             receipts = None
