@@ -86,6 +86,30 @@ class IntakeBot:
                                   InlineKeyboardButton("🧰 2. Other tasks", callback_data="menu:other")]])
     SESSION_KEYS = ReplyKeyboardMarkup([[RECAP_LABEL, END_LABEL]], resize_keyboard=True, is_persistent=True)
 
+    def _other_tasks(self, user) -> str:
+        """Every command the bot understands (admin-only ones only for admins)."""
+        lines = [
+            "🧰 <b>Other tasks</b> — type these any time:",
+            "",
+            "🔎 <code>cek SRPD53K1</code> / <code>cek AC 5014</code> (/cek) — is it in accounting, its stock, "
+            "and what the bot has received. Add L / G to filter AC/EXP/CA models.",
+            "🗑 <code>revoke &lt;id&gt;</code> (/revoke, batal) — undo a saved item or a whole group, using the id "
+            "from its confirmation (e.g. 20261125-8a6b15, or …-3 for one watch).",
+            "🗂 /sheet — which spreadsheet the bot writes to, with a link.",
+            "❔ <code>?</code> or <code>help</code> — what the marks in a summary mean.",
+            "🏠 /start or /menu — this menu.",
+            "",
+            "<b>During an intake session</b>:",
+            f"📋 {RECAP_LABEL} (rekap, /rekap) — what's staged and what's already in the sheet.",
+            f"⏹ {END_LABEL} (/end, selesai) — write the staged items to the sheet and get the summary.",
+            "✏️ Reply to a summary to correct it; in a group start with the number (<code>3 dial black</code>, "
+            "<code>1,3 1.900.000</code>, <code>hapus 5</code>) or <code>semua …</code> for all.",
+        ]
+        if user.id in getattr(self.s, "admin_user_ids", frozenset()):
+            lines += ["", "<b>Admin</b>:",
+                      "🔧 <code>/sheet set &lt;ID or link&gt;</code> — switch to another spreadsheet."]
+        return "\n".join(lines)
+
     async def _show_menu(self, message: Message, first_name: str | None) -> None:
         await message.reply_text(greeting(first_name), parse_mode=ParseMode.HTML, reply_markup=self.MENU)
 
@@ -158,9 +182,8 @@ class IntakeBot:
                 await query.edit_message_reply_markup(None)
                 await self._start_intake(message, user)
             elif rest == "other":
-                await message.reply_text(
-                    "🧰 <b>Other tasks</b>\n\n🔎 <b>Cek SKU / model</b>: type <code>cek SRPD53K1</code> or "
-                    "<code>cek AC 5014</code> to see if it's in accounting, its stock, and what the bot has received.", parse_mode=ParseMode.HTML, reply_markup=self.MENU)
+                await message.reply_text(self._other_tasks(user), parse_mode=ParseMode.HTML,
+                                         reply_markup=self.MENU)
             elif rest == "dismiss":
                 self._waiting.pop((message.chat_id, user.id), None)
                 await query.edit_message_text("OK, photo not used.")
@@ -469,9 +492,7 @@ class IntakeBot:
             await self._start_intake(msg, user)
             return
         if not session and typed.lower() in ("2", "other", "other tasks"):
-            await msg.reply_text("🧰 <b>Other tasks</b>\n\n🔎 <b>Cek SKU / model</b>: type <code>cek SRPD53K1</code> or "
-                    "<code>cek AC 5014</code> to see if it's in accounting, its stock, and what the bot has received.", parse_mode=ParseMode.HTML,
-                                 reply_markup=self.MENU)
+            await msg.reply_text(self._other_tasks(user), parse_mode=ParseMode.HTML, reply_markup=self.MENU)
             return
         group = None
         if msg.reply_to_message:
@@ -1250,9 +1271,25 @@ def build_application(settings: Settings) -> Application:
 
     # Telegram's default 5 s read timeout is too short for file downloads on
     # slower routes; a lost photo is worse than a slow one.
+    async def set_commands(application: Application) -> None:
+        from telegram import BotCommand
+        try:
+            await application.bot.set_my_commands([
+                BotCommand("start", "Menu: intake or other tasks"),
+                BotCommand("rekap", "Recap of this intake session"),
+                BotCommand("end", "End intake and write to the sheet"),
+                BotCommand("cek", "Check a SKU or model, e.g. /cek AC 5014"),
+                BotCommand("revoke", "Undo a saved item or group by its id"),
+                BotCommand("sheet", "Which spreadsheet the bot writes to"),
+                BotCommand("help", "Menu and help"),
+            ])
+        except Exception:
+            log.exception("Couldn't set the command menu")
+
     app = (Application.builder().token(settings.telegram_token)
            .connect_timeout(15).read_timeout(30).write_timeout(30).pool_timeout(15)
            .get_updates_connect_timeout(15).get_updates_read_timeout(30)
+           .post_init(set_commands)
            .build())
     app.add_handler(CommandHandler(["start", "help", "menu"], bot.start))
     app.add_handler(CommandHandler(["end", "selesai"], bot.end_command))

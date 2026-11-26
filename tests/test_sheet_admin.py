@@ -68,3 +68,14 @@ def test_switch_blocked_while_items_are_staged_then_done(tmp_path, monkeypatch):
     press(bot, f"sh:set:{NEW_ID}")
     assert bot.sheet is new and saved == {"SHEET_ID": NEW_ID}
     assert "Now using New receipts" in last()[0] and "Legend" in new.book.tabs
+
+
+def test_other_tasks_lists_commands_and_admin_ones_only_for_admins(tmp_path):
+    for admin in (False, True):
+        bot, st, sheet = setup(tmp_path, admin=admin)
+        st.end_session(st.active_session(1, 2).id)                 # menu answers "2" outside a session
+        run(bot.text(upd(Msg("2")), None))
+        text = last()[0]
+        for cmd in ("cek SRPD53K1", "revoke <id>", "/sheet", "📋 Recap", "⏹ End intake", "1,3 1.900.000"):
+            assert cmd in text, cmd
+        assert ("/sheet set" in text) is admin
