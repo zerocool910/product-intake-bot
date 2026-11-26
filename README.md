@@ -103,8 +103,21 @@ and the bot's Google service-account email. An admin (`ADMIN_USER_IDS` in
 3. On ✅ Switch it creates the month tab and Legend there, uses it at once
    and updates `SHEET_ID` in `.env` (kept after restarts).
 
-The switch is refused while anyone has staged items in an open session
-(end those first, so one session's receipts aren't split across files).
+**A clean slate** (both admin-only, ask first, and are refused while anyone
+has staged items, so one session's receipts aren't split):
+
+- `/sheet fresh [label]` — empty month tab **now**, same file. The current
+  month tab is renamed (to your label, or `Intake 2026-11 (old 26-11 15:40)`)
+  and kept as is; a new empty `Intake 2026-11` takes its place. The renamed
+  tab is out of the bot's same-day and duplicate checks, so import any
+  rows still in it from that tab. A new month needs nothing: on the 1st the
+  bot starts the new month tab by itself.
+- `/sheet new [name]` — a brand-new spreadsheet file, then switches to it
+  like `/sheet set`. Google service accounts have no storage of their own,
+  so this needs `SHEET_FOLDER_ID` in `.env`: a folder in a **Shared Drive**
+  with the service account as Content manager. Without it the bot explains
+  the manual route (create a file, share it, `/sheet set <link>`).
+
 Rows already in the old spreadsheet stay there.
 
 ## Install on the server

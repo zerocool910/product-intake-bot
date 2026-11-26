@@ -1,6 +1,7 @@
 """Monthly tabs, receipt dates, same-day Replace / Add qty."""
 
 from datetime import date
+from zoneinfo import ZoneInfo
 
 import gspread
 from gspread.utils import a1_to_rowcol
@@ -12,6 +13,7 @@ class FakeWorksheet:
     def __init__(self, title):
         self.title, self.rows, self.col_count = title, [], len(HEADER)
         self.id = abs(hash(title)) % 10**9
+        self.book = None
 
     def row_values(self, n):
         return self.rows[n - 1] if len(self.rows) >= n else []
@@ -40,6 +42,11 @@ class FakeWorksheet:
     def delete_rows(self, index):
         del self.rows[index - 1]
 
+    def update_title(self, title):
+        if self.book is not None:
+            self.book.tabs[title] = self.book.tabs.pop(self.title)
+        self.title = title
+
     def update(self, values, range_name, value_input_option=None):
         row, col = a1_to_rowcol(range_name)
         while len(self.rows) < row:
@@ -65,12 +72,14 @@ class FakeBook:
 
     def add_worksheet(self, title, rows, cols):
         self.tabs[title] = FakeWorksheet(title)
+        self.tabs[title].book = self
         return self.tabs[title]
 
 
 class FakeSheet(Sheet):
     def __init__(self, day):
         self.book, self.prefix, self._tabs, self.day = FakeBook(), "Intake", {}, day
+        self.tz = ZoneInfo("Asia/Jakarta")
 
     def today(self):
         return self.day
@@ -135,3 +144,16 @@ def test_name_clash_check_spans_earlier_months():
     assert [c["intake_id"] for c in clashes] == ["A-white"]
     new, text = auto_descriptor(C, blue, clashes)
     assert text == "diBLU"                         # so its SKU differs from model A's
+
+
+def test_fresh_tab_renames_the_month_tab_and_starts_an_empty_one():
+    sheet = FakeSheet(date(2026, 11, 26))
+    sheet.append(receipt(sheet, "a", "SRPD53K1"))
+    old, new = sheet.fresh_tab("Intake 2026-11 test")
+    assert (old, new) == ("Intake 2026-11 test", "Intake 2026-11")
+    assert sheet.current().get_all_records() == [] and len(sheet.book.tabs[old].get_all_records()) == 1
+    assert sheet.same_sku_today("SRPD53K1") == [] and [w.title for w in sheet._month_tabs()] == ["Intake 2026-11"]
+    old2, _ = sheet.fresh_tab("Intake 2026-11 test")          # a taken label gets a number
+    assert old2 == "Intake 2026-11 test 2"
+    old3, _ = sheet.fresh_tab()
+    assert old3.startswith("Intake 2026-11 (old 26-11 ")

@@ -78,6 +78,7 @@ class IntakeBot:
         self.photo_dir.mkdir(parents=True, exist_ok=True)
         self._albums: dict[str, list[Message]] = {}
         self._waiting: dict[tuple[int, int], list[Message]] = {}  # photos sent with no session open
+        self._pending_sheet: dict[int, tuple[str, str | None]] = {}  # admin's /sheet fresh|new awaiting a tap
         self.tz = ZoneInfo(getattr(settings, "timezone", "Asia/Jakarta"))
 
     # ---------- menu and intake sessions ----------
@@ -107,7 +108,10 @@ class IntakeBot:
         ]
         if user.id in getattr(self.s, "admin_user_ids", frozenset()):
             lines += ["", "<b>Admin</b>:",
-                      "🔧 <code>/sheet set &lt;ID or link&gt;</code> — switch to another spreadsheet."]
+                      "🔧 <code>/sheet set &lt;ID or link&gt;</code> — switch to another spreadsheet.",
+                      "🧹 <code>/sheet fresh [label]</code> — empty month tab now (the old one is renamed and kept).",
+                      "🆕 <code>/sheet new [name]</code> — create a new spreadsheet file (needs a Shared Drive "
+                      "folder) and switch to it."]
         return "\n".join(lines)
 
     async def _show_menu(self, message: Message, first_name: str | None) -> None:
@@ -325,13 +329,44 @@ class IntakeBot:
                 f"🗂 <b>Spreadsheet</b>: {e(title)}\nID <code>{e(self.sheet.book.id)}</code>\n"
                 f"Tab now: <a href=\"{e(url, quote=True)}\">{e(self.sheet.tab_title())}</a>\n"
                 f"Bot's Google account (share new sheets with it as Editor): <code>{e(self._service_email())}</code>\n\n"
-                "Admins can switch: <code>/sheet set &lt;ID or link&gt;</code>", parse_mode=ParseMode.HTML)
+                "Admins: <code>/sheet set &lt;ID or link&gt;</code> · <code>/sheet fresh</code> (empty month tab now) · "
+                "<code>/sheet new [name]</code> (new file)", parse_mode=ParseMode.HTML)
             return
-        if args[0].lower() != "set" or len(args) < 2:
-            await msg.reply_text("Use /sheet to see the current spreadsheet, or /sheet set <ID or link> to switch.")
+        sub_cmd = args[0].lower()
+        if sub_cmd not in ("set", "fresh", "new") or (sub_cmd == "set" and len(args) < 2):
+            await msg.reply_text("Use /sheet, /sheet set <ID or link>, /sheet fresh [label] or /sheet new [name].")
             return
         if user.id not in getattr(self.s, "admin_user_ids", frozenset()):
-            await msg.reply_text("Only an admin can switch the spreadsheet (ADMIN_USER_IDS in the bot's .env).")
+            await msg.reply_text("Only an admin can change the spreadsheet (ADMIN_USER_IDS in the bot's .env).")
+            return
+        if sub_cmd == "fresh":
+            label = " ".join(args[1:]) or None
+            self._pending_sheet[user.id] = ("fresh", label)
+            await msg.reply_text(
+                f"Start an <b>empty {e(self.sheet.tab_title())}</b> tab now?\nThe current one is renamed to "
+                f"<b>{e(label or self.sheet.tab_title() + ' (old …)')}</b> and kept as is. The bot's same-day and "
+                "duplicate checks won't see its rows anymore. Rows in it that weren't imported yet must be imported "
+                "from that tab.", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🧹 Start fresh tab", callback_data="sh:fresh:-"),
+                    InlineKeyboardButton("Keep", callback_data="sh:keep:-")]]))
+            return
+        if sub_cmd == "new":
+            folder = getattr(self.s, "sheet_folder_id", "")
+            if not folder:
+                await msg.reply_text(
+                    "I can't create files myself: my Google service account has no storage of its own. Either:\n"
+                    f"1. create a spreadsheet yourself, share it with <code>{e(self._service_email())}</code> as "
+                    "Editor, then <code>/sheet set &lt;link&gt;</code>; or\n"
+                    "2. give me a Shared Drive folder (SHEET_FOLDER_ID in .env, me as Content manager) and I'll "
+                    "create files there.", parse_mode=ParseMode.HTML)
+                return
+            name = " ".join(args[1:]) or f"Product intake {self.sheet.today():%Y}"
+            self._pending_sheet[user.id] = ("new", name)
+            await msg.reply_text(
+                f"Create a new spreadsheet <b>{e(name)}</b> in the Shared Drive folder and switch to it?",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🆕 Create & switch", callback_data="sh:new:-"),
+                    InlineKeyboardButton("Keep", callback_data="sh:keep:-")]]))
             return
         m = self._SHEET_ID.search(args[1])
         if not m:
@@ -361,26 +396,62 @@ class IntakeBot:
         _, action, new_id = query.data.split(":", 2)
         await query.answer()
         await query.edit_message_reply_markup(None)
-        if action != "set":
+        if action not in ("set", "fresh", "new"):
+            self._pending_sheet.pop(user.id, None)
             await query.message.reply_text("OK, spreadsheet unchanged.")
             return
         if user.id not in getattr(self.s, "admin_user_ids", frozenset()):
-            await query.message.reply_text("Only an admin can switch the spreadsheet.")
+            await query.message.reply_text("Only an admin can change the spreadsheet.")
             return
         staged = [(s, n) for s in self.store.open_sessions()
                   if (n := sum(1 for i in self.store.session_items(s.id) if i.status == "staged"))]
         if staged:
             who = ", ".join(f"{s.user_name} ({n})" for s, n in staged)
             await query.message.reply_text(
-                f"⏳ Not switched: items are staged in open sessions ({who}). End those sessions first so their "
-                "receipts don't end up split across two files, then run /sheet set again.")
+                f"⏳ Not changed: items are staged in open sessions ({who}). End those sessions first so their "
+                "receipts don't end up split across two tabs or files, then try again.")
             return
+        pending = self._pending_sheet.pop(user.id, None)
+        if action == "fresh":
+            label = pending[1] if pending and pending[0] == "fresh" else None
+            try:
+                old_name, new_name = await asyncio.to_thread(self.sheet.fresh_tab, label)
+            except Exception as err:
+                log.exception("Fresh tab failed")
+                await query.message.reply_text(f"❌ Couldn't start a fresh tab ({type(err).__name__}).")
+                return
+            log.info("User %s started a fresh tab: %r -> %r", user.id, old_name, new_name)
+            url = self.sheet.tab_url() or ""
+            await query.message.reply_text(
+                f"🧹 Fresh tab <a href=\"{html.escape(url, quote=True)}\">{html.escape(new_name)}</a> started. "
+                f"The previous rows are in <b>{html.escape(old_name)}</b>.", parse_mode=ParseMode.HTML)
+            return
+        if action == "new":
+            name = pending[1] if pending and pending[0] == "new" else f"Product intake {self.sheet.today():%Y}"
+            try:
+                new_id = await asyncio.to_thread(self._create_sheet, name)
+            except Exception as err:
+                log.exception("Creating a spreadsheet failed")
+                await query.message.reply_text(
+                    f"❌ Couldn't create the file ({type(err).__name__}). Check SHEET_FOLDER_ID is a Shared Drive "
+                    "folder where my service account is Content manager, or create the file yourself and use "
+                    "/sheet set <link>.")
+                return
+        await self._switch_to(query.message, user, new_id)
+
+    def _create_sheet(self, name: str) -> str:
+        import gspread
+        client = gspread.service_account(filename=self.s.google_credentials_file)
+        return client.create(name, folder_id=self.s.sheet_folder_id).id
+
+    async def _switch_to(self, query_message: Message, user, new_id: str) -> None:
+        """Open, prepare and switch to spreadsheet `new_id` (used by /sheet set and /sheet new)."""
         try:
             new_sheet = await asyncio.to_thread(self._open_sheet, new_id)
             await asyncio.to_thread(new_sheet.write_guide, sample_rows(self.catalog))
         except Exception as err:
             log.exception("Switching to sheet %s failed", new_id)
-            await query.message.reply_text(f"❌ Couldn't set up the new spreadsheet ({type(err).__name__}). "
+            await query_message.reply_text(f"❌ Couldn't set up the new spreadsheet ({type(err).__name__}). "
                                            "Still using the old one.")
             return
         old_id = self.sheet.book.id
@@ -393,7 +464,7 @@ class IntakeBot:
             saved = "⚠️ Couldn't update .env: after a restart the bot will use the old one. Update SHEET_ID by hand."
         log.info("User %s switched the spreadsheet %s -> %s", user.id, old_id, new_id)
         url = new_sheet.tab_url() or ""
-        await query.message.reply_text(
+        await query_message.reply_text(
             f"✅ Now using <a href=\"{html.escape(url, quote=True)}\">{html.escape(new_sheet.book.title)}</a>. {saved}",
             parse_mode=ParseMode.HTML)
 

@@ -43,6 +43,20 @@ class Sheet:
     def today(self) -> date:
         return datetime.now(self.tz).date()
 
+    def fresh_tab(self, label: str | None = None) -> tuple[str, str]:
+        """Start an empty tab for this month now: the current one is renamed
+        (kept as is, and out of the bot's same-day / duplicate checks) and a
+        new "<prefix> YYYY-MM" tab is created. Returns (old new name, tab)."""
+        ws = self.current()
+        base = label.strip() if label and label.strip() else f"{ws.title} (old {datetime.now(self.tz):%d-%m %H:%M})"
+        taken = {w.title for w in self.book.worksheets()}
+        name, n = base, 2
+        while name in taken:
+            name, n = f"{base} {n}", n + 1
+        ws.update_title(name)
+        self._tabs = {}
+        return name, self.current().title
+
     def tab_url(self) -> str | None:
         """Link that opens the spreadsheet on this month's tab."""
         try:

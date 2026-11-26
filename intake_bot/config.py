@@ -24,6 +24,7 @@ class Settings:
     accounting_api_url: str = ""
     accounting_api_token: str = ""
     admin_user_ids: frozenset[int] = frozenset()
+    sheet_folder_id: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -42,6 +43,7 @@ class Settings:
         return cls(
             telegram_token=need("TELEGRAM_BOT_TOKEN"),
             allowed_user_ids=allowed,
+            sheet_folder_id=os.environ.get("SHEET_FOLDER_ID", "").strip(),
             admin_user_ids=frozenset(int(x) for x in os.environ.get("ADMIN_USER_IDS", "").replace(" ", "").split(",")
                                      if x),
             claude_model=os.environ.get("CLAUDE_MODEL", "claude-opus-5-5"),
