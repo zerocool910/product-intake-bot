@@ -43,6 +43,13 @@ class Sheet:
     def today(self) -> date:
         return datetime.now(self.tz).date()
 
+    def tab_url(self) -> str | None:
+        """Link that opens the spreadsheet on this month's tab."""
+        try:
+            return f"https://docs.google.com/spreadsheets/d/{self.book.id}/edit#gid={self.current().id}"
+        except Exception:
+            return None
+
     def tab_title(self, day: date | None = None) -> str:
         return f"{self.prefix} {(day or self.today()):%Y-%m}"
 

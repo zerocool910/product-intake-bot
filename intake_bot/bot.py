@@ -131,7 +131,8 @@ class IntakeBot:
                 f"Your session is still open: tap {END_LABEL} again in a moment.", reply_markup=self.SESSION_KEYS)
             return
         session = self.store.end_session(session_id)
-        text = session_summary(session, self.store.session_items(session_id), self.tz, self.sheet.tab_title())
+        text = session_summary(session, self.store.session_items(session_id), self.tz, self.sheet.tab_title(),
+                               self.sheet.tab_url())
         if written:
             text = f"💾 {written} item(s) written to the sheet.\n" + "\n".join(f"ℹ️ {n}" for n in notes) + \
                    ("\n" if notes else "") + "\n" + text

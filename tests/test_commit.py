@@ -14,6 +14,9 @@ def test_sheet_untouched_until_end_intake(tmp_path):
     run(bot.text(upd(Msg("⏹ End intake")), None))
     assert rows(sheet) == [(item.id, 1, "")]
     assert any("1 item(s) written to the sheet" in o[0] for o in Msg.out[-3:])
+    gid = sheet.current().id
+    assert any(f"Written to the sheet tab Intake 2026-11" in o[0] for o in Msg.out[-3:])
+    assert sheet.tab_url() == f"https://docs.google.com/spreadsheets/d/FAKE_SHEET_ID/edit#gid={gid}"
 
 
 def test_add_qty_onto_an_item_staged_in_the_same_session(tmp_path):

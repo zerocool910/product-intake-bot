@@ -28,7 +28,7 @@ def _rp(v: float) -> str:
     return f"Rp{v:,.0f}"
 
 
-def summary(session: Session, items: list[Intake], tz: ZoneInfo, tab: str) -> str:
+def summary(session: Session, items: list[Intake], tz: ZoneInfo, tab: str, url: str | None = None) -> str:
     """End-of-session report: what was received, as written to the sheet."""
     start = _local(session.started_at, tz)
     end = _local(session.ended_at, tz) if session.ended_at else datetime.now(tz)
@@ -72,7 +72,9 @@ def summary(session: Session, items: list[Intake], tz: ZoneInfo, tab: str) -> st
             out.append(f"   {len(lines_added)} new sheet line(s); the rest replaced or added to today's lines.")
     if cancelled:
         out.append(f"❌ Cancelled: {len(cancelled)}")
-    out += ["", f"🗂 Sheet tab: <b>{html.escape(tab)}</b>. Import after today ends: rows dated today are "
+    sheet = (f'<a href="{html.escape(url, quote=True)}">{html.escape(tab)}</a>' if url
+             else f"<b>{html.escape(tab)}</b>")
+    out += ["", f"🗂 Written to the sheet tab {sheet}. Import after today ends: rows dated today are "
                 "skipped by the importer."]
     return "\n".join(out)
 

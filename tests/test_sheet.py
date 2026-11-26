@@ -11,6 +11,7 @@ from intake_bot.sheet import HEADER, Sheet
 class FakeWorksheet:
     def __init__(self, title):
         self.title, self.rows, self.col_count = title, [], len(HEADER)
+        self.id = abs(hash(title)) % 10**9
 
     def row_values(self, n):
         return self.rows[n - 1] if len(self.rows) >= n else []
@@ -46,6 +47,7 @@ class FakeWorksheet:
 class FakeBook:
     def __init__(self):
         self.tabs = {}
+        self.id = "FAKE_SHEET_ID"
 
     def worksheet(self, title):
         if title not in self.tabs:
