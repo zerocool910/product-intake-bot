@@ -23,6 +23,7 @@ class Settings:
     data_dir: Path
     accounting_api_url: str = ""
     accounting_api_token: str = ""
+    admin_user_ids: frozenset[int] = frozenset()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -41,6 +42,8 @@ class Settings:
         return cls(
             telegram_token=need("TELEGRAM_BOT_TOKEN"),
             allowed_user_ids=allowed,
+            admin_user_ids=frozenset(int(x) for x in os.environ.get("ADMIN_USER_IDS", "").replace(" ", "").split(",")
+                                     if x),
             claude_model=os.environ.get("CLAUDE_MODEL", "claude-opus-5-5"),
             google_credentials_file=need("GOOGLE_SERVICE_ACCOUNT_FILE"),
             spreadsheet_id=need("SHEET_ID"),
@@ -50,3 +53,26 @@ class Settings:
             accounting_api_url=os.environ.get("ACCOUNTING_API_URL", "").strip(),
             accounting_api_token=os.environ.get("ACCOUNTING_API_TOKEN", "").strip(),
         )
+
+
+def update_env(key: str, value: str, path: Path = ROOT / ".env") -> None:
+    """Set KEY=value in .env (replacing the existing line, or appending),
+    written atomically so a crash can't leave a half-written file."""
+    import re
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    out, done = [], False
+    for line in lines:
+        if re.match(rf"^\s*{re.escape(key)}\s*=", line):
+            if not done:
+                out.append(f"{key}={value}")
+                done = True
+            continue
+        out.append(line)
+    if not done:
+        out.append(f"{key}={value}")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
+    if path.exists():
+        os.chmod(tmp, path.stat().st_mode & 0o777)
+    os.replace(tmp, path)
+    os.environ[key] = value

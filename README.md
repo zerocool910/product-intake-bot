@@ -91,6 +91,22 @@ The bot replies with what it read. ❓ marks anything it wasn't sure of.
 Reply to that message to fix anything ("rubber not leather, ladies"), then
 press ✅ Confirm. ✅ only appears once nothing required is missing.
 
+## Changing the spreadsheet
+
+`/sheet` shows the spreadsheet in use (name, ID, link to this month's tab)
+and the bot's Google service-account email. An admin (`ADMIN_USER_IDS` in
+`.env`) switches with `/sheet set <ID or full link>`:
+
+1. Share the new spreadsheet with that service-account email as **Editor**.
+2. `/sheet set https://docs.google.com/spreadsheets/d/…/edit`. The bot
+   checks it can open the file, shows its title and asks to confirm.
+3. On ✅ Switch it creates the month tab and Legend there, uses it at once
+   and updates `SHEET_ID` in `.env` (kept after restarts).
+
+The switch is refused while anyone has staged items in an open session
+(end those first, so one session's receipts aren't split across files).
+Rows already in the old spreadsheet stay there.
+
 ## Install on the server
 
 Needs Python 3.11+ and an always-on Linux machine with outbound internet.

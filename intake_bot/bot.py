@@ -23,7 +23,7 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, Con
 
 from .caption import apply_sale_price, parse_caption
 from .catalog import Catalog
-from .config import Settings
+from .config import Settings, update_env
 from .item import DEFAULT_QUANTITY, ItemFields, auto_descriptor, review, sample_rows, to_import_row
 from .master import MasterUnavailable, ProductMaster, base_reference, match, parse_descriptor
 from .naming import decode_cipher
@@ -270,6 +270,110 @@ class IntakeBot:
         await msg.reply_text(staged_recap(session, self.store.session_items(session.id), self.tz),
                              parse_mode=ParseMode.HTML, reply_markup=self.SESSION_KEYS)
 
+    # ---------- spreadsheet settings ----------
+
+    _SHEET_ID = re.compile(r"(?:/spreadsheets/d/)?([A-Za-z0-9_-]{25,})")
+
+    def _service_email(self) -> str:
+        try:
+            import json
+            with open(self.s.google_credentials_file, encoding="utf-8") as fh:
+                return json.load(fh).get("client_email", "?")
+        except Exception:
+            return "?"
+
+    def _probe_sheet(self, sheet_id: str) -> str:
+        """Title of the spreadsheet, opened read-only; raises if the bot can't open it."""
+        import gspread
+        return gspread.service_account(filename=self.s.google_credentials_file).open_by_key(sheet_id).title
+
+    def _open_sheet(self, sheet_id: str) -> Sheet:
+        return Sheet(self.s.google_credentials_file, sheet_id, self.s.worksheet, self.s.timezone)
+
+    async def sheet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._allowed(update):
+            return
+        msg, user, args = update.effective_message, update.effective_user, list(context.args or [])
+        e = html.escape
+        if not args:
+            title = await asyncio.to_thread(lambda: self.sheet.book.title)
+            url = self.sheet.tab_url() or ""
+            await msg.reply_text(
+                f"🗂 <b>Spreadsheet</b>: {e(title)}\nID <code>{e(self.sheet.book.id)}</code>\n"
+                f"Tab now: <a href=\"{e(url, quote=True)}\">{e(self.sheet.tab_title())}</a>\n"
+                f"Bot's Google account (share new sheets with it as Editor): <code>{e(self._service_email())}</code>\n\n"
+                "Admins can switch: <code>/sheet set &lt;ID or link&gt;</code>", parse_mode=ParseMode.HTML)
+            return
+        if args[0].lower() != "set" or len(args) < 2:
+            await msg.reply_text("Use /sheet to see the current spreadsheet, or /sheet set <ID or link> to switch.")
+            return
+        if user.id not in getattr(self.s, "admin_user_ids", frozenset()):
+            await msg.reply_text("Only an admin can switch the spreadsheet (ADMIN_USER_IDS in the bot's .env).")
+            return
+        m = self._SHEET_ID.search(args[1])
+        if not m:
+            await msg.reply_text("That doesn't look like a Google Sheets ID or link.")
+            return
+        new_id = m.group(1)
+        if new_id == self.sheet.book.id:
+            await msg.reply_text("That's already the spreadsheet in use.")
+            return
+        try:
+            title = await asyncio.to_thread(self._probe_sheet, new_id)
+        except Exception as err:
+            log.warning("Probe of sheet %s failed: %s", new_id, err)
+            await msg.reply_text(
+                f"❌ I can't open that spreadsheet ({e(type(err).__name__)}). Share it with "
+                f"<code>{e(self._service_email())}</code> as <b>Editor</b>, then try again.", parse_mode=ParseMode.HTML)
+            return
+        await msg.reply_text(
+            f"Switch the bot to <b>{e(title)}</b>?\nID <code>{e(new_id)}</code>\n\n"
+            f"New receipts go to its <b>{e(self.sheet.tab_title())}</b> tab (created if missing). Rows already in the "
+            "old spreadsheet stay there, and same-day / duplicate checks will only see the new one.",
+            parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Switch", callback_data=f"sh:set:{new_id}"),
+                InlineKeyboardButton("Keep", callback_data="sh:keep:-")]]))
+
+    async def _sheet_button(self, query, user) -> None:
+        _, action, new_id = query.data.split(":", 2)
+        await query.answer()
+        await query.edit_message_reply_markup(None)
+        if action != "set":
+            await query.message.reply_text("OK, spreadsheet unchanged.")
+            return
+        if user.id not in getattr(self.s, "admin_user_ids", frozenset()):
+            await query.message.reply_text("Only an admin can switch the spreadsheet.")
+            return
+        staged = [(s, n) for s in self.store.open_sessions()
+                  if (n := sum(1 for i in self.store.session_items(s.id) if i.status == "staged"))]
+        if staged:
+            who = ", ".join(f"{s.user_name} ({n})" for s, n in staged)
+            await query.message.reply_text(
+                f"⏳ Not switched: items are staged in open sessions ({who}). End those sessions first so their "
+                "receipts don't end up split across two files, then run /sheet set again.")
+            return
+        try:
+            new_sheet = await asyncio.to_thread(self._open_sheet, new_id)
+            await asyncio.to_thread(new_sheet.write_guide, sample_rows(self.catalog))
+        except Exception as err:
+            log.exception("Switching to sheet %s failed", new_id)
+            await query.message.reply_text(f"❌ Couldn't set up the new spreadsheet ({type(err).__name__}). "
+                                           "Still using the old one.")
+            return
+        old_id = self.sheet.book.id
+        self.sheet = new_sheet
+        try:
+            update_env("SHEET_ID", new_id)
+            saved = "Saved in .env, so it stays after a restart."
+        except Exception:
+            log.exception("Couldn't update .env")
+            saved = "⚠️ Couldn't update .env: after a restart the bot will use the old one. Update SHEET_ID by hand."
+        log.info("User %s switched the spreadsheet %s -> %s", user.id, old_id, new_id)
+        url = new_sheet.tab_url() or ""
+        await query.message.reply_text(
+            f"✅ Now using <a href=\"{html.escape(url, quote=True)}\">{html.escape(new_sheet.book.title)}</a>. {saved}",
+            parse_mode=ParseMode.HTML)
+
     async def end_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed(update):
             await self._end_requested(update.effective_message, update.effective_user)
@@ -409,6 +513,9 @@ class IntakeBot:
             return
         if query.data.startswith("g:"):
             await self._group_button(query)
+            return
+        if query.data.startswith("sh:"):
+            await self._sheet_button(query, update.effective_user)
             return
         if query.data.startswith("rv:"):
             await self._revoke_button(query, update.effective_user)
@@ -1152,6 +1259,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler(["cek", "check"], bot.lookup_command))
     app.add_handler(CommandHandler(["revoke", "batal"], bot.revoke_command))
     app.add_handler(CommandHandler(["rekap", "recap", "staged"], bot.recap_command))
+    app.add_handler(CommandHandler(["sheet", "file"], bot.sheet_command))
     app.add_handler(MessageHandler(filters.PHOTO, bot.photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.text))
     app.add_handler(CallbackQueryHandler(bot.button))

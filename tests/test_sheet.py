@@ -31,6 +31,12 @@ class FakeWorksheet:
     def append_row(self, values, value_input_option=None):
         self.rows.append(list(values))
 
+    def clear(self):
+        self.rows = []
+
+    def format(self, ranges, fmt):
+        pass
+
     def delete_rows(self, index):
         del self.rows[index - 1]
 
