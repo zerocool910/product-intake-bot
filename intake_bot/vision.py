@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 
 from typing import Literal, Optional
 
@@ -53,6 +54,8 @@ How to fill the fields:
 "Stainless St." is a metal bracelet; "Leather", "Rubber", "Kanvas" etc. are straps.
 - manufacturer_sku: only if a model/reference code (e.g. SRPD53K1) is clearly printed on a tag, \
 caseback, or box in the photo. Copy it exactly.
+- barcode_digits: if a barcode (EAN/UPC) on a tag or box belongs to that item, copy the digits printed \
+under the bars exactly, all of them. "" if there is none, it isn't clearly that item's, or any digit is unreadable.
 - Price tags in this shop show a letter cipher (e.g. "EBB"). If you see one, copy the letters \
 into notes as "tag cipher: EBB". Do not try to decode it.
 - dial_color and index_type: the dial's color and the hour-marker style (Numeral, Baton, Roman), \
@@ -105,6 +108,7 @@ class SeenItem(BaseModel):
     dial_color: str
     index_type: str
     manufacturer_sku: str
+    barcode_digits: str
     uncertain: list[str]
     notes: str
 
@@ -127,7 +131,7 @@ class PhotoResult:
 
 _TEXT_FIELDS = ("brand", "strap_type", "strap_color", "case_color", "gender", "dial_color", "index_type",
                 "crown_color", "ref_code", "manufacturer_sku", "category", "photo_dial_color",
-                "photo_index_type", "reference_choice", "notes")
+                "photo_index_type", "reference_choice", "barcode", "notes")
 _NUMBER_FIELDS = ("supplied_price", "selling_price", "cost_price")
 
 
@@ -153,6 +157,7 @@ class CorrectionFields(BaseModel):
     photo_dial_color: str
     photo_index_type: str
     reference_choice: str
+    barcode: str
     uncertain: list[str]
     notes: str
 
@@ -222,6 +227,7 @@ class Vision:
                 strap_color=it.strap_color or None, case_color=it.case_color or None,
                 manufacturer_sku=it.manufacturer_sku or None, photo_dial_color=it.dial_color or None,
                 photo_index_type=it.index_type or None, notes=it.notes or None,
+                barcode=re.sub(r"\D", "", it.barcode_digits) or None,
                 uncertain=[rename.get(u, u) for u in it.uncertain if u not in NOT_FROM_PHOTO]))
         return PhotoResult(count=max(batch.count, len(items)), count_sure=batch.count_sure and batch.count == len(items),
                            items=items or [ItemFields(notes="No item recognised in the photo.")],

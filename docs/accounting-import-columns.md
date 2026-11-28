@@ -39,7 +39,8 @@ are recorded as stock receipts in accounting, not imported again.
 
 Known gaps on the accounting side (as of 2026-11-04): AC/EXP/CA **clocks**
 have no generated-SKU pattern yet, so they need `manufacturer_sku` set by
-hand. Barcode is not an import column yet.
+hand. Barcode is not an import column yet: the bot records it in its own
+`barcode` column (below) so it can be imported once accounting has the field.
 
 ## Read by the importer since accounting `8855f72`
 
@@ -74,7 +75,8 @@ How the bot fills the import columns (owner decisions, 2026-11-19):
 Bot-only columns after the import columns (the importer ignores them):
 `intake_id`, `logged_by`, `logged_at`, `photos`, `preview_name`,
 `preview_sku`, `notes`, `photo_dial_color`, `photo_index_type` (what
-Claude saw). The importer only reads the workbook's **active** tab, so
+Claude saw), `receipt_date`, `barcode` (decoded from the photos or typed;
+blank if none). The importer only reads the workbook's **active** tab, so
 select the month tab (e.g. `Intake 2026-11`) before downloading.
 
 The bot also writes hover notes on the `Intake` header cells and a

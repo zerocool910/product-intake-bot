@@ -47,7 +47,14 @@ def parse_command(text: str) -> tuple[str, int | None, str] | None:
 def quick_change(text: str) -> dict | None:
     """Changes that don't need Claude: any mix of a price, a gender word and
     a quantity ("1.180.000 L", "L", "qty 3", "980k G 2pcs")."""
+    from .barcode import from_text
     from .caption import parse_price
+    code, rest = from_text(text)
+    if code:
+        if rest.strip():
+            other = quick_change(rest)
+            return None if other is None else {**other, "barcode": code}
+        return {"barcode": code}
     t = text.strip().lower()
     if m := _QTY_ONLY.match(t):
         return {"quantity": int(next(g for g in m.groups() if g))}
@@ -67,6 +74,7 @@ def quick_change(text: str) -> dict | None:
 def apply_change(f: ItemFields, change: dict) -> ItemFields:
     data = f.model_dump()
     data.update(change)
+    data["uncertain"] = [u for u in data["uncertain"] if u not in change]  # staff set it: no ❓
     return ItemFields(**data)
 
 

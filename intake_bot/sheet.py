@@ -48,7 +48,7 @@ class Sheet:
         (kept as is, and out of the bot's same-day / duplicate checks) and a
         new "<prefix> YYYY-MM" tab is created. Returns (old new name, tab)."""
         ws = self.current()
-        base = label.strip() if label and label.strip() else f"{ws.title} (old {datetime.now(self.tz):%d-%m %H:%M})"
+        base = label.strip() if label and label.strip() else f"{ws.title} (old {self.today():%d-%m} {datetime.now(self.tz):%H:%M})"
         taken = {w.title for w in self.book.worksheets()}
         name, n = base, 2
         while name in taken:

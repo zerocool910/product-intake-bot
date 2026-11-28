@@ -82,6 +82,13 @@ Seiko JD 250k sku QXA756W        (JD or "clock" = a clock)
   Typed values override what Claude reads from the photo, so a full
   caption works even if the photo can't be read. Quantity: `1pcs`,
   `2 pcs`, `qty 2`, `x2`.
+- **Barcode:** the bot decodes the barcode on the tag or box from the
+  photos (an album with a close-up of the tag works best). If it can't
+  decode one, it takes the digits printed under the bars only when the check
+  digit is right (shown with ❓). Nothing found → blank. Type it to set or
+  fix it: `barcode 4901234567894` in the caption or as a reply (`bc`, `ean`
+  work too). In a group photo set it per watch: `3 barcode 4901234567894`.
+  It's written to the sheet's `barcode` column at End intake.
 - **List brands** (AC, EXP, CA, Seiko, Alba, Casio, Guess, Aigner): type
   the distributor's **list price**.
 - **Nett brands** (Bonia, Timberland, Sezen, …): type the **cost**.

@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from .catalog import Catalog
+from .barcode import from_text as barcode_from_text
 from .item import ItemFields
 
 _PRICE = re.compile(
@@ -93,6 +94,9 @@ def parse_caption(catalog: Catalog, text: str | None) -> ItemFields:
 
     # Strip ref/sku/qty first so their digits aren't read as a price.
     rest = text
+    code, rest = barcode_from_text(rest)
+    if code:
+        out["barcode"] = code
     if m := _REF.search(rest):
         out["ref_code"] = m.group(1).upper()
         rest = rest.replace(m.group(0), " ")

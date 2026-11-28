@@ -26,7 +26,7 @@ IMPORT_COLUMNS = [
 # New columns go at the END so an existing sheet's header is a prefix of
 # this one and can be extended in place without shifting old rows.
 AUDIT_COLUMNS = ["intake_id", "logged_by", "logged_at", "photos", "preview_name", "preview_sku", "notes",
-                 "photo_dial_color", "photo_index_type", "receipt_date"]
+                 "photo_dial_color", "photo_index_type", "receipt_date", "barcode"]
 DEFAULT_QUANTITY = 1  # staff photograph an item in hand (owner decision 2026-11-19)
 
 # One line per column: (filled by, required, meaning, used by the importer?).
@@ -57,6 +57,7 @@ LEGEND: dict[str, tuple[str, str, str, bool]] = {
     "photo_dial_color": ("Claude", "", "Dial color seen in the photo. Info only; used for the automatic descriptor.", False),
     "photo_index_type": ("Claude", "", "Index style seen in the photo. Info only; used for the automatic descriptor.", False),
     "notes": ("Claude / bot", "", "Free notes, e.g. tag cipher seen, [replaces …], +N qty (…).", False),
+    "barcode": ("Photo scan / caption (barcode …)", "", "Barcode on the tag or box (EAN/UPC or other), decoded from the photos or typed by staff. Blank if none. Bot info until accounting imports it.", False),
     "receipt_date": ("Bot", "", "Date the goods were received (local time). Same SKU on the same date: Replace or Add qty; a later date is a new receipt.", False),
 }
 
@@ -86,6 +87,9 @@ class ItemFields(BaseModel):
     # Staff picked the existing product without descriptor (base reference)
     # from the bot's "which one?" buttons.
     reference_choice: Optional[str] = None
+    # Not an import column yet (bot column "barcode"). From the photo scan,
+    # Claude's reading (check digit verified) or typed by staff.
+    barcode: Optional[str] = None
     uncertain: list[str] = Field(default_factory=list, description="Field names the model is not confident about.")
     notes: Optional[str] = None
 
@@ -289,13 +293,13 @@ def sample_rows(catalog: Catalog) -> list[tuple[str, dict[str, object]]]:
                     strap_color="Brown", case_color="Gold", gender="Gents", selling_price=650_000)),
         ("Clock (Seiko, list price 250,000)",
          ItemFields(type="clock", brand="Seiko", manufacturer_sku="QXA756W", case_color="White",
-                    supplied_price=250_000)),
+                    supplied_price=250_000, barcode="4954628422318")),
     ]
     out = []
     for label, f in cases:
         r = review(catalog, f)
         row = to_import_row(catalog, f)
         row.update({"preview_name": r.name or "", "preview_sku": r.sku or "", "receipt_date": "2026-11-19",
-                    "photo_dial_color": f.photo_dial_color or "", "photo_index_type": f.photo_index_type or ""})
+                    "photo_dial_color": f.photo_dial_color or "", "photo_index_type": f.photo_index_type or "", "barcode": f.barcode or ""})
         out.append((label, row))
     return out

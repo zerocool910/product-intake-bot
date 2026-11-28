@@ -21,6 +21,8 @@ from telegram.error import TimedOut
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
+from .barcode import (choose as choose_barcode, from_text as barcode_from_text, looks_mistyped,
+                      scan as scan_barcodes)
 from .caption import apply_sale_price, parse_caption
 from .catalog import Catalog
 from .config import Settings, update_env
@@ -525,12 +527,13 @@ class IntakeBot:
             result = await asyncio.to_thread(self.vision.propose_items, images, caption)
         except VisionError as e:
             result = PhotoResult(count=1, count_sure=True, items=[ItemFields(notes=f"Photo not read: {e}")], notes="")
+        scanned = await asyncio.to_thread(scan_barcodes, [d for d, _ in images])
 
         if len(result.items) > 1:
             await status.delete()
-            await self._start_group(first, user, session_id, intake_id, result, caption, paths)
+            await self._start_group(first, user, session_id, intake_id, result, caption, paths, scanned)
             return
-        proposed = result.items[0]
+        proposed = self._with_barcode(result.items[0], scanned)
         fields = apply_sale_price(self.catalog, proposed.merged(parse_caption(self.catalog, caption)))
         intake = self.store.create(intake_id, first.chat_id, user.id, user.full_name, fields, paths, session_id)
         await status.delete()
@@ -586,11 +589,16 @@ class IntakeBot:
             else:
                 await self._show_menu(msg, user.first_name)
             return
-        try:
-            corrected = await asyncio.to_thread(self.vision.correct, intake.fields, msg.text)
-        except VisionError as e:
-            await msg.reply_text(f"Couldn't apply that: {e}")
-            return
+        code, rest = barcode_from_text(typed)
+        base = apply_change(intake.fields, {"barcode": code}) if code else intake.fields
+        if code and not any(ch.isalnum() for ch in rest):
+            corrected = base
+        else:
+            try:
+                corrected = await asyncio.to_thread(self.vision.correct, base, rest if code else msg.text)
+            except VisionError as e:
+                await msg.reply_text(f"Couldn't apply that: {e}")
+                return
         fields = apply_sale_price(self.catalog, corrected)
         self.store.update(intake.id, fields=fields)
         await self._send_summary(msg, self.store.get(intake.id))
@@ -719,6 +727,7 @@ class IntakeBot:
             "photo_dial_color": intake.fields.photo_dial_color or "",
             "photo_index_type": intake.fields.photo_index_type or "",
             "receipt_date": receipt_date,
+            "barcode": intake.fields.barcode or "",
         })
         return row
 
@@ -871,11 +880,49 @@ class IntakeBot:
 
     # ---------- multi-item photos ----------
 
+    @staticmethod
+    def _with_barcode(f: ItemFields, scanned: list[str]) -> ItemFields:
+        """One item: the decoded barcode, else Claude's digits if the check digit fits (❓)."""
+        code, unsure, note = choose_barcode(scanned, f.barcode)
+        data = f.model_dump()
+        data["barcode"] = code
+        data["uncertain"] = [u for u in f.uncertain if u != "barcode"] + (["barcode"] if unsure else [])
+        if note:
+            data["notes"] = f"{f.notes or ''} [{note}]".strip()
+        return ItemFields(**data)
+
+    @staticmethod
+    def _group_barcodes(items: list[ItemFields], scanned: list[str]) -> tuple[list[ItemFields], str | None]:
+        """Several items in one photo: which barcode is whose can't be told from
+        the decoder, so each item keeps the digits Claude placed on it only if
+        the check digit fits; a decoded code confirms it (no ❓). Decoded codes
+        no item got are listed for staff to place ("3 barcode …")."""
+        from .barcode import gtin_ok
+        out, used = [], set()
+        for f in items:
+            data = f.model_dump()
+            code = f.barcode if f.barcode and gtin_ok(f.barcode) else None
+            if code and code in used:
+                code = None  # the same code on two items: Claude guessed, leave both to staff
+            data["barcode"] = code
+            unsure = bool(code) and code not in scanned
+            data["uncertain"] = [u for u in f.uncertain if u != "barcode"] + (["barcode"] if unsure else [])
+            if code:
+                used.add(code)
+            out.append(ItemFields(**data))
+        left = [c for c in scanned if c not in used]
+        note = (f"barcode(s) in the photo not placed on an item: {', '.join(left)}. "
+                f"Set one with e.g. \"2 barcode {left[0]}\"") if left else None
+        return out, note
+
     async def _start_group(self, first: Message, user, session_id: int | None, base_id: str,
-                           result: PhotoResult, caption: str | None, paths: list[str]) -> None:
+                           result: PhotoResult, caption: str | None, paths: list[str],
+                           scanned: list[str] | None = None) -> None:
         common, rules = split_variant_lines(self.catalog, caption, parse_caption)
         cap, total = split_caption(parse_caption(self.catalog, common))
-        items = [seen.merged(cap) for seen in result.items]
+        cap = cap.model_copy(update={"barcode": None})  # one typed barcode can't be every watch's
+        seen_items, barcode_note = self._group_barcodes(result.items, scanned or [])
+        items = [seen.merged(cap) for seen in seen_items]
         items, unmatched = apply_rules(items, rules)
         read_as = [x for r in rules for x in r.read_as]
         items = [apply_sale_price(self.catalog, f) for f in items]
@@ -887,7 +934,8 @@ class IntakeBot:
         for n, problem in unmatched.items():
             note = f"{items[n].notes or ''} [caption: {problem}]".strip()
             items[n] = apply_change(items[n], {"notes": note})
-        group_notes = " ".join(filter(None, [result.notes, *(f"[caption {x}]" for x in read_as)])) or None
+        group_notes = " ".join(filter(None, [result.notes, *(f"[caption {x}]" for x in read_as),
+                                             barcode_note and f"[{barcode_note}]"])) or None
         self.store.create_group(base_id, first.chat_id, user.id, session_id, result.count, result.count_sure,
                                 total, group_notes)
         if gender_note:
@@ -967,6 +1015,8 @@ class IntakeBot:
             lines.append(hint)
         for corr in re.findall(r"\[caption ([^\]]*)\]", group.notes or ""):
             lines.append(f"✏️ {e(corr)}")
+        for bc in re.findall(r"\[(barcode\(s\) in the photo[^\]]*)\]", group.notes or ""):
+            lines.append(f"▮ {e(bc)}")
         genders = {i.fields.gender for i in items}
         missing_g = [str(i.position) for i in items if not i.fields.gender]
         if missing_g and len(missing_g) == len(items):
@@ -989,7 +1039,8 @@ class IntakeBot:
             unsure = " ❓" if f.uncertain else ""
             qty = f" ×{f.quantity}" if f.quantity is not None and f.quantity != 1 else ""
             tag = "📦" if "Restock" in notes.get(i.id, "") else "🆕" if "New product" in notes.get(i.id, "") else ""
-            lines.append(f"<b>{i.position}.</b> {e(' '.join(parts))}{seen}{unsure}{qty} {tag}")
+            code = f" · ▮{e(f.barcode)}{' ❓' if 'barcode' in f.uncertain else ''}" if f.barcode else ""
+            lines.append(f"<b>{i.position}.</b> {e(' '.join(parts))}{seen}{code}{unsure}{qty} {tag}")
             if per_item:
                 g = self.catalog.genders.get(f.gender)
                 money = (f"Rp{(f.supplied_price or f.selling_price):,.0f}" if (f.supplied_price or f.selling_price)
@@ -1230,6 +1281,10 @@ class IntakeBot:
             if getattr(f, key):
                 lines.append(line(label, getattr(f, key), key))
         lines += [line("Ref code", f.ref_code), line("Mfr SKU", f.manufacturer_sku, "manufacturer_sku")]
+        lines.append(line("Barcode", f.barcode, "barcode") if f.barcode
+                     else "Barcode: — (none found; add with <code>barcode &lt;digits&gt;</code>)")
+        if looks_mistyped(f.barcode):
+            lines.append("⚠️ That barcode's check digit doesn't fit: probably a typo. Retype it if so.")
         if f.supplied_price:
             lines.append(line("Supplied price", f"Rp{f.supplied_price:,.0f}"))
         if f.selling_price:
